@@ -2337,29 +2337,31 @@ async function pullFromSharepoint(manual = false) {
   if (!getSpConfig().siteUrl) { if (manual) alert('Configurez d\'abord l\'URL SharePoint dans ⚙️ Paramètres.'); return; }
   if (!msalAccount) { if (manual) { msalLogin(); } return; }
 
-  // SÉCURITÉ : le pull automatique n'écrase jamais les données locales existantes.
-  // Seul un pull MANUEL peut écraser — et uniquement si SharePoint a plus de données.
-  if (!manual && consultations.length > 0) {
-    updateSpStatus('ok');
-    return; // données locales prioritaires sur auto-sync
-  }
-
   updateSpStatus('loading');
   const remote = await loadFromSharepoint();
-  if (!remote) { if (manual) alert('Fichier introuvable sur SharePoint. Il sera créé lors de la prochaine sauvegarde.'); updateSpStatus('idle'); return; }
-
-  // Sécurité : n'écraser les données locales que si SharePoint en a davantage
-  const remoteConsultCount = remote.consultations?.length || 0;
-  const localConsultCount = consultations.length;
-  if (!manual && remoteConsultCount <= localConsultCount) {
-    updateSpStatus('ok');
+  if (!remote) {
+    if (manual) alert('Fichier introuvable sur SharePoint. Il sera créé lors de la prochaine sauvegarde.');
+    updateSpStatus('idle');
     return;
   }
 
+  // MODE COLLABORATIF : SharePoint est la source unique de vérité.
+  // On fusionne en gardant le plus grand nombre de consultations.
   let changed = false;
-  if (remote.consultations && remote.consultations.length > 0) {
-    if (JSON.stringify(remote.consultations) !== JSON.stringify(consultations)) {
-      consultations = remote.consultations; changed = true;
+  if (remote.consultations) {
+    // Fusionner : garder toutes les consultations locales + celles de SharePoint non présentes localement
+    const localIds = new Set(consultations.map(c => c.id));
+    const remoteOnly = remote.consultations.filter(c => !localIds.has(c.id));
+    if (remoteOnly.length > 0) {
+      consultations = [...consultations, ...remoteOnly];
+      changed = true;
+    }
+    // Si SharePoint a plus de modifications sur des consultations existantes, prendre SharePoint
+    if (!changed && JSON.stringify(remote.consultations) !== JSON.stringify(consultations)) {
+      // Prendre la version avec le plus de données
+      if (remote.consultations.length > consultations.length) {
+        consultations = remote.consultations; changed = true;
+      }
     }
   }
   if (remote.affréteurs && remote.affréteurs.length > 0 && JSON.stringify(remote.affréteurs) !== JSON.stringify(affréteurs)) {
@@ -2689,7 +2691,9 @@ async function syncOutlookReplies(consultId = null) {
   // Fetch last 7 days of emails
   const since = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
   const fields = 'id,subject,from,receivedDateTime,body,isRead';
-  const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(cfg.mailboxEmail)}/messages?$filter=receivedDateTime ge ${since}&$select=${fields}&$top=50&$orderby=receivedDateTime desc`;
+  // Pour les boîtes partagées : ne pas utiliser $orderby avec $filter (cause AllItems not found)
+  // Utiliser le dossier Inbox directement
+  const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(cfg.mailboxEmail)}/mailFolders/Inbox/messages?$filter=receivedDateTime ge ${since}&$select=${fields}&$top=50`;
 
   let messages = [];
   try {
@@ -3553,7 +3557,7 @@ async function scanARCsFromEmail() {
   // Fetch recent emails with "confirmation de commande" subject in the last 30 days
   const since = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
   const filter = encodeURIComponent(`receivedDateTime ge ${since} and (contains(subject,'confirmation') or contains(subject,'commande') or contains(subject,'ARC') or contains(subject,'Confirmation'))`);
-  const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(cfg.mailboxEmail)}/messages?$filter=${filter}&$select=id,subject,from,receivedDateTime,hasAttachments&$top=50&$orderby=receivedDateTime desc`;
+  const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(cfg.mailboxEmail)}/mailFolders/Inbox/messages?$filter=${filter}&$select=id,subject,from,receivedDateTime,hasAttachments&$top=50`;
 
   let messages = [];
   try {
