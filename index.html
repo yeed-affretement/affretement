@@ -2743,12 +2743,23 @@ async function syncOutlookReplies(consultId = null) {
     cfg.mailboxEmail.toLowerCase(),
     ...(msalAccount?.username ? [msalAccount.username.toLowerCase()] : []),
   ];
+  // Sujets à ignorer : accusés d'échec, réponses automatiques, spam
+  const IGNORE_SUBJECTS = ['undeliverable', 'non remis', 'delivery failed', 'delivery failure',
+    'mailer-daemon', 'mail delivery', 'bounce', 'échec de remise', 'message non remis',
+    'automatic reply', 'réponse automatique', 'out of office', 'absent du bureau'];
+  // Expéditeurs système à ignorer
+  const IGNORE_FROM = ['mailer-daemon', 'postmaster', 'microsoftexchange', 'noreply', 'no-reply'];
+
   const results = [];
   for (const msg of messages) {
     if (isAlreadyImported(msg.id)) continue;
     const fromEmail = (msg.from?.emailAddress?.address || '').toLowerCase();
+    const subject = (msg.subject || '').toLowerCase();
     // Ignorer les emails envoyés par notre propre boîte (demandes sortantes)
     if (ownEmails.includes(fromEmail)) continue;
+    // Ignorer les accusés d'échec et réponses automatiques
+    if (IGNORE_SUBJECTS.some(s => subject.includes(s))) continue;
+    if (IGNORE_FROM.some(s => fromEmail.includes(s))) continue;
     const match = matchEmailToConsultation(msg.subject || '', fromEmail, consultId);
     if (!match.consultId) continue;
     const parsed = parseEmailBody(msg.body?.content || '');
