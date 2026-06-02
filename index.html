@@ -2712,25 +2712,29 @@ async function syncOutlookReplies(consultId = null) {
     return;
   }
 
-  // Fetch last 7 days of emails
+  // Fetch last 7 days of emails — essayer plusieurs endpoints pour boîtes partagées
   const since = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
   const fields = 'id,subject,from,receivedDateTime,body,isRead';
-  // Pour les boîtes partagées : ne pas utiliser $orderby avec $filter (cause AllItems not found)
-  // Utiliser le dossier Inbox directement
-  const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(cfg.mailboxEmail)}/mailFolders/Inbox/messages?$filter=receivedDateTime ge ${since}&$select=${fields}&$top=50`;
+  const mailbox = encodeURIComponent(cfg.mailboxEmail);
+  const endpoints = [
+    `https://graph.microsoft.com/v1.0/users/${mailbox}/messages?$filter=receivedDateTime ge ${since}&$select=${fields}&$top=50`,
+    `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/Inbox/messages?$filter=receivedDateTime ge ${since}&$select=${fields}&$top=50`,
+    `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/inbox/messages?$select=${fields}&$top=50`,
+  ];
 
   let messages = [];
-  try {
-    const resp = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
-    if (!resp.ok) {
+  let lastError = '';
+  for (const url of endpoints) {
+    try {
+      const resp = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+      if (resp.ok) { const data = await resp.json(); messages = data.value || []; break; }
       const errText = await resp.text();
-      throw new Error(`HTTP ${resp.status} — ${errText.slice(0, 200)}`);
-    }
-    const data = await resp.json();
-    messages = data.value || [];
-  } catch(e) {
-    if (statusEl) { statusEl.className = 'sync-status disconnected'; statusEl.innerHTML = `<span class="sync-dot gray"></span> Erreur : ${escapeHtml(e.message)}`; }
-    alert('Erreur lors de la récupération des emails :\n' + e.message);
+      lastError = `HTTP ${resp.status} — ${errText.slice(0, 150)}`;
+    } catch(e) { lastError = e.message; }
+  }
+  if (!messages.length && lastError) {
+    if (statusEl) { statusEl.className = 'sync-status disconnected'; statusEl.innerHTML = `<span class="sync-dot gray"></span> Erreur : ${escapeHtml(lastError)}`; }
+    alert('Erreur lors de la récupération des emails :\n' + lastError);
     return;
   }
 
@@ -3584,7 +3588,7 @@ async function scanARCsFromEmail() {
   // Fetch recent emails with "confirmation de commande" subject in the last 30 days
   const since = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
   const filter = encodeURIComponent(`receivedDateTime ge ${since} and (contains(subject,'confirmation') or contains(subject,'commande') or contains(subject,'ARC') or contains(subject,'Confirmation'))`);
-  const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(cfg.mailboxEmail)}/mailFolders/Inbox/messages?$filter=${filter}&$select=id,subject,from,receivedDateTime,hasAttachments&$top=50`;
+  const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(cfg.mailboxEmail)}/messages?$filter=${filter}&$select=id,subject,from,receivedDateTime,hasAttachments&$top=50`;
 
   let messages = [];
   try {
