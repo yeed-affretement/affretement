@@ -2216,7 +2216,8 @@ function getMsalConfig() {
 let spSaveTimer = null;
 
 function getSpConfig() {
-  const siteUrl = localStorage.getItem('sp_site_url') || '';
+  // Utilise le localStorage si configuré, sinon les valeurs YEED par défaut
+  const siteUrl = localStorage.getItem('sp_site_url') || YEED_DEFAULTS.spSiteUrl;
   return { siteUrl, folder: 'YEED-Affretement', filename: 'data.json' };
 }
 
