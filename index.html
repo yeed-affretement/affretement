@@ -555,9 +555,10 @@
                   <label>Synchronisation automatique</label>
                   <select name="sync_interval">
                     <option value="0">Manuelle uniquement</option>
+                    <option value="0.5" selected>Toutes les 30 secondes</option>
+                    <option value="1">Toutes les minutes</option>
+                    <option value="5">Toutes les 5 minutes</option>
                     <option value="15">Toutes les 15 minutes</option>
-                    <option value="30">Toutes les 30 minutes</option>
-                    <option value="60">Toutes les heures</option>
                   </select>
                 </div>
               </div>
@@ -2205,7 +2206,7 @@ function getMsalConfig() {
     tenantId:     localStorage.getItem('azure_tenant_id')  || YEED_DEFAULTS.tenantId,
     mailboxEmail: localStorage.getItem('mailbox_email')    || YEED_DEFAULTS.mailboxEmail,
     spSiteUrl:    localStorage.getItem('sp_site_url')      || YEED_DEFAULTS.spSiteUrl,
-    syncInterval: parseInt(localStorage.getItem('sync_interval') || '0'),
+    syncInterval: parseFloat(localStorage.getItem('sync_interval') || '0'),
   };
 }
 
@@ -2983,10 +2984,13 @@ function startAutoSync() {
   const cfg = getMsalConfig();
   if (!cfg.syncInterval || cfg.syncInterval <= 0) return;
   stopAutoSync();
+  const intervalMs = Math.max(30000, cfg.syncInterval * 60 * 1000); // min 30s
   syncTimer = setInterval(() => {
-    if (msalAccount) syncOutlookReplies();
-  }, cfg.syncInterval * 60 * 1000);
-  console.log(`Auto-sync every ${cfg.syncInterval} min.`);
+    if (msalAccount) {
+      pullFromSharepoint(); // sync données SharePoint (partagées entre collègues)
+    }
+  }, intervalMs);
+  console.log(`Auto-sync every ${intervalMs/1000}s.`);
 }
 
 function stopAutoSync() {
