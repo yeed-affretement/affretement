@@ -2572,12 +2572,11 @@ function initMsal() {
         renderParametres();
         startAutoSync();
         showToast('✅ Connecté : ' + resp.account.username);
-        // If the redirect was for SharePoint consent, retry sync now
-        if (resp.scopes && (resp.scopes.includes('Sites.ReadWrite.All') || resp.scopes.includes('Files.ReadWrite.All'))) {
-          _spSiteId = null;
-          _spSiteIdUrl = '';
-          setTimeout(() => { if (getSpConfig().siteUrl) pullFromSharepoint(); }, 1000);
-        }
+        // Toujours récupérer les données SharePoint après connexion (sync collaborative)
+        _spSiteId = null;
+        _spSiteIdUrl = '';
+        _spBlocked403 = false;
+        setTimeout(() => { if (getSpConfig().siteUrl) pullFromSharepoint(); }, 1500);
       }
     }).catch(e => {
       if (e && e.errorCode !== 'user_cancelled') {
@@ -2586,7 +2585,12 @@ function initMsal() {
       }
     });
     const accounts = msalApp.getAllAccounts().filter(a => a.username?.toLowerCase().endsWith('@yeedgroup.com'));
-    if (accounts.length) { msalAccount = accounts[0]; unlockApp(); }
+    if (accounts.length) {
+      msalAccount = accounts[0];
+      unlockApp();
+      // Récupérer les données partagées depuis SharePoint dès que le compte est restauré
+      setTimeout(() => { if (getSpConfig().siteUrl) pullFromSharepoint(); }, 2500);
+    }
     return msalApp;
   } catch(e) {
     console.error('MSAL init error:', e);
