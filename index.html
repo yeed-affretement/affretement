@@ -1533,22 +1533,40 @@ async function getMailToken() {
 }
 
 async function sendGraphMail(token, toEmail, toName, subject, bodyText) {
-  const resp = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
-    method: 'POST',
-    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const cfg = getMsalConfig();
+  const sharedMailbox = cfg.mailboxEmail || YEED_DEFAULTS.mailboxEmail;
+
+  // Essai 1 : envoyer depuis la boîte partagée affretement@yeedgroup.com
+  // (nécessite "Send As" ou "Full Access" sur la boîte partagée)
+  const endpoints = [
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(sharedMailbox)}/sendMail`,
+    `https://graph.microsoft.com/v1.0/me/sendMail`,
+  ];
+
+  for (const endpoint of endpoints) {
+    const body = {
       message: {
         subject,
         body: { contentType: 'Text', content: bodyText },
         toRecipients: [{ emailAddress: { address: toEmail, name: toName } }],
       },
       saveToSentItems: true,
-    }),
-  });
-  if (!resp.ok) {
+    };
+    // Pour /me/sendMail : spécifier "from" pour envoyer au nom de la boîte partagée
+    if (endpoint.includes('/me/sendMail')) {
+      body.message.from = { emailAddress: { address: sharedMailbox } };
+    }
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (resp.ok) return; // succès
+    if (resp.status === 403 || resp.status === 404) continue; // essayer l'endpoint suivant
     const err = await resp.json().catch(() => ({}));
     throw new Error(err?.error?.message || 'HTTP ' + resp.status);
   }
+  throw new Error('Impossible d\'envoyer depuis la boîte partagée. Vérifiez les droits "Send As" sur affretement@yeedgroup.com.');
 }
 
 async function sendOneEmailViaGraph(consultId, affId) {
