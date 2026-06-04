@@ -2872,17 +2872,18 @@ async function syncOutlookReplies(consultId = null) {
   const IGNORE_FROM = ['mailer-daemon', 'postmaster', 'microsoftexchange', 'noreply', 'no-reply'];
 
   const results = [];
+  const skippedLog = []; // debug
   for (const msg of messages) {
-    if (isAlreadyImported(msg.id)) continue;
     const fromEmail = (msg.from?.emailAddress?.address || '').toLowerCase();
     const subject = (msg.subject || '').toLowerCase();
-    // Ignorer tous les emails internes @yeedgroup.com
-    if (isInternalEmail(fromEmail)) continue;
-    // Ignorer les accusés d'échec et réponses automatiques
-    if (IGNORE_SUBJECTS.some(s => subject.includes(s))) continue;
-    if (IGNORE_FROM.some(s => fromEmail.includes(s))) continue;
+    const subjectOrig = msg.subject || '(sans objet)';
+
+    if (isAlreadyImported(msg.id)) { skippedLog.push(`DÉJÀ IMPORTÉ: ${subjectOrig}`); continue; }
+    if (isInternalEmail(fromEmail)) { skippedLog.push(`INTERNE (${fromEmail}): ${subjectOrig}`); continue; }
+    if (IGNORE_SUBJECTS.some(s => subject.includes(s))) { skippedLog.push(`SUJET IGNORÉ: ${subjectOrig}`); continue; }
+    if (IGNORE_FROM.some(s => fromEmail.includes(s))) { skippedLog.push(`EXPÉDITEUR IGNORÉ (${fromEmail}): ${subjectOrig}`); continue; }
     const match = matchEmailToConsultation(msg.subject || '', fromEmail, consultId);
-    if (!match.consultId) continue;
+    if (!match.consultId) { skippedLog.push(`PAS DE CONSULTATION TROUVÉE (${fromEmail}): ${subjectOrig}`); continue; }
     const parsed = parseEmailBody(msg.body?.content || '');
     results.push({
       msgId: msg.id,
@@ -2914,10 +2915,10 @@ async function syncOutlookReplies(consultId = null) {
   renderSyncHistory();
 
   if (results.length === 0) {
-    const msg = messages.length === 0
+    let msg = messages.length === 0
       ? 'Aucun email reçu ces 7 derniers jours dans la boîte dédiée.'
-      : `${messages.length} email(s) analysés — aucune nouvelle réponse d'affréteur détectée.`;
-    alert('✅ Synchronisation terminée\n\n' + msg);
+      : `${messages.length} email(s) analysés — aucune réponse détectée.\n\nDétail des emails ignorés :\n${skippedLog.slice(0,10).join('\n')}`;
+    alert('Synchronisation terminée\n\n' + msg);
     return;
   }
 
@@ -2946,12 +2947,15 @@ function matchEmailToConsultation(subject, fromEmail, targetConsultId = null) {
   if (refMatch) {
     const c = consultations.find(x => x.reference === refMatch[0] && activeStatuts.includes(x.statut));
     if (c) return { consultId: c.id, confidence: 90 };
+    // Référence trouvée mais consultation pas active → chercher quand même
+    const cAny = consultations.find(x => x.reference === refMatch[0]);
+    if (cAny) return { consultId: cAny.id, confidence: 75 };
   }
 
   // 2. Targeted sync for a specific consultation
   if (targetConsultId) {
     const c = getConsult(targetConsultId);
-    if (c && activeStatuts.includes(c.statut)) {
+    if (c) {
       if (fromEmail) {
         const aff = affréteurs.find(a => a.email?.toLowerCase() === fromEmail.toLowerCase());
         if (aff && c.affréteurs_consultés?.includes(aff.id)) return { consultId: c.id, confidence: 80 };
@@ -2960,13 +2964,27 @@ function matchEmailToConsultation(subject, fromEmail, targetConsultId = null) {
     }
   }
 
-  // 3. Sender email matches a known broker → find their active consultation
   if (fromEmail) {
-    const aff = affréteurs.find(a => a.email?.toLowerCase() === fromEmail.toLowerCase());
-    if (aff) {
-      const active = consultations.filter(c => activeStatuts.includes(c.statut) && c.affréteurs_consultés?.includes(aff.id));
-      if (active.length === 1) return { consultId: active[0].id, confidence: 65 };
-      if (active.length > 1) return { consultId: active[0].id, confidence: 40 };
+    const fromDomain = fromEmail.split('@')[1] || '';
+
+    // 3. Email exact match
+    const affExact = affréteurs.find(a => a.email?.toLowerCase() === fromEmail.toLowerCase());
+    if (affExact) {
+      const active = consultations.filter(c => activeStatuts.includes(c.statut) && c.affréteurs_consultés?.includes(affExact.id));
+      if (active.length >= 1) return { consultId: active[0].id, confidence: 65 };
+    }
+
+    // 4. Domaine email = même société (ex: Bertrand.Chombeau@mumnet.com → affretementhal@mumnet.com)
+    if (fromDomain) {
+      const affDomain = affréteurs.find(a => {
+        const d = (a.email || '').split('@')[1]?.toLowerCase();
+        return d && d === fromDomain.toLowerCase();
+      });
+      if (affDomain) {
+        const active = consultations.filter(c => activeStatuts.includes(c.statut) && c.affréteurs_consultés?.includes(affDomain.id));
+        if (active.length === 1) return { consultId: active[0].id, confidence: 60, affId: affDomain.id };
+        if (active.length > 1) return { consultId: active[0].id, confidence: 40, affId: affDomain.id };
+      }
     }
   }
 
