@@ -1530,10 +1530,15 @@ async function getMailToken() {
     const r = await msalApp.acquireTokenSilent({ scopes, account: msalAccount });
     return r.accessToken;
   } catch(e) {
+    // Utiliser popup au lieu de redirect pour ne pas quitter la page
     try {
-      await msalApp.acquireTokenRedirect({ scopes, account: msalAccount, redirectUri: window.location.origin + window.location.pathname });
-    } catch(e2) { console.warn('Mail token error:', e2); }
-    return null;
+      const r2 = await msalApp.acquireTokenPopup({ scopes, account: msalAccount });
+      return r2.accessToken;
+    } catch(e2) {
+      console.warn('Mail token error:', e2);
+      showToast('❌ Connexion requise pour envoyer des emails. Reconnectez-vous.', 'error');
+      return null;
+    }
   }
 }
 
@@ -2259,9 +2264,9 @@ async function getSpToken(forceRefresh = false) {
     return r.accessToken;
   } catch(e) {
     try {
-      await msalApp.acquireTokenRedirect({ scopes, account: msalAccount, redirectUri: window.location.origin + window.location.pathname });
-    } catch(e2) { console.warn('SP token error:', e2); }
-    return null;
+      const r2 = await msalApp.acquireTokenPopup({ scopes, account: msalAccount });
+      return r2.accessToken;
+    } catch(e2) { console.warn('SP token error:', e2); return null; }
   }
 }
 
