@@ -3676,7 +3676,9 @@ function renderPlanCommandes() {
           <div style="font-weight:700;font-size:13px;">${c.client} <span style="color:var(--text-muted);font-weight:400;">— Cde ${c.num_commande||'?'}</span></div>
           <div style="font-size:11px;color:var(--text-muted);">📍 ${c.ville_liv} (${dept}) — Zone ${zone} | 📅 Livr. ${formatDate(c.date_liv)}</div>
           <div style="font-size:11px;margin-top:4px;">
-            ${c.lignes.map(l => `<span style="background:#f1f5f9;border-radius:4px;padding:1px 5px;margin-right:3px;">${l.ref} × ${l.qty} → ${l.label}</span>`).join('')}
+            ${c.lignes.length
+              ? c.lignes.map(l => `<span style="background:#f1f5f9;border-radius:4px;padding:1px 5px;margin-right:3px;">${l.ref} × ${l.qty} → ${l.label||'?'}</span>`).join('')
+              : `<span style="color:var(--warning);font-size:10px;">⚠️ Aucune ligne détectée — ${c.debug||'vérifiez le PDF'}</span>`}
           </div>
         </div>
         <div style="text-align:right;flex-shrink:0;">
@@ -4064,10 +4066,22 @@ function parseARCText(text, filename) {
 
   
   // === ÉTAPE 4 : extraire le client ===
-  const afterYeed = t.match(/(?:yeedgroup[^\s]*|NIEPPE)\s+([A-Z][A-Z\s-]{2,40}?)\s+\d{5}/i);
-  if (afterYeed) {
-    client = afterYeed[1].trim();
-    for (let i=0;i<5;i++) client=client.replace(/([A-Z]) ([A-Z])/g,'$1$2');
+  // Dans le texte brut (lettres espacées), le client apparaît entre 59850 et le 2e CP
+  // On cherche des séquences de majuscules isolées (A B C = chaque lettre séparée par espace)
+  if (cp_liv) {
+    const cp59850Idx = t.indexOf('59850');
+    const cpLivIdx = t.indexOf(cp_liv);
+    if (cp59850Idx >= 0 && cpLivIdx > cp59850Idx) {
+      // Zone entre YEED et livraison
+      const zone = t.slice(cp59850Idx + 5, cpLivIdx);
+      // Trouver le bloc qui ressemble à un nom de société : suite de majuscules isolées
+      // "P U Y B A R E T" → chaque lettre séparée par 1 espace
+      const nameMatch = zone.match(/([A-Z](?: [A-Z]){2,20})/);
+      if (nameMatch) {
+        // Compacter : "P U Y B A R E T" → "PUYBARET"
+        client = nameMatch[1].replace(/ /g, '');
+      }
+    }
   }
 
   // === ÉTAPE 5 : dates ===
@@ -4079,33 +4093,44 @@ function parseARCText(text, filename) {
   const lignes = [];
   const allRefs = [...t.matchAll(/\b([12]1\d{4})\b/g)];
   const allQtys = [...t.matchAll(/\b(\d{1,6}),(\d{3})\b/g)];
+  const debugRef = `refs:${allRefs.map(r=>r[1]).join(',')||'aucune'} qtys:${allQtys.length}`;
+
   for (const refMatch of allRefs) {
     const ref = parseInt(refMatch[1]);
     const refPos = refMatch.index;
-    if (ref<110000||ref>219999) continue;
-    const winStart = Math.max(0,refPos-350);
-    const window = t.slice(winStart,refPos+50);
-    if (window.toLowerCase().includes('ecotaxe')) continue;
-    const datesInWin = [...window.matchAll(/(\d{2}\/\d{2}\/\d{4})/g)];
+    if (ref < 110000 || ref > 219999) continue;
+    const winStart = Math.max(0, refPos - 400);
+    const win = t.slice(winStart, refPos + 50);
+    if (win.toLowerCase().includes('ecotaxe')) continue;
+    const datesInWin = [...win.matchAll(/(\d{2}\/\d{2}\/\d{4})/g)];
     if (!datesInWin.length) continue;
     const dateLiv = parseFrDateARC(datesInWin[0][1]);
-    const qtysInWin = allQtys.filter(q=>q.index>=winStart&&q.index<refPos);
+    // Quantités dans la fenêtre avant la référence
+    const qtysInWin = allQtys.filter(q => q.index >= winStart && q.index < refPos);
     if (!qtysInWin.length) continue;
-    const bestQty = qtysInWin.reduce((a,b)=>parseInt(a[1])>=parseInt(b[1])?a:b);
-    const qty = Math.round(parseFloat(bestQty[1]+'.'+bestQty[2]));
-    if (!qty||qty<=0) continue;
+    // Prendre la plus grande quantité (exclut les prix unitaires faibles)
+    const bestQty = qtysInWin.reduce((a,b) => parseInt(a[1]) >= parseInt(b[1]) ? a : b);
+    const qty = Math.round(parseFloat(bestQty[1] + '.' + bestQty[2]));
+    if (!qty || qty <= 0) continue;
     const prod = YEED_PRODUCTS[ref];
-    const calc = calculerLignePalettes(ref,qty);
-    lignes.push({ref:String(ref),desc:prod?.desc||`Ref ${ref}`,qty,date_liv:dateLiv,...calc});
+    const calc = calculerLignePalettes(ref, qty);
+    lignes.push({ ref: String(ref), desc: prod?.desc || `Réf ${ref}`, qty, date_liv: dateLiv, ...calc });
   }
+
   const date_liv = lignes.length
-    ? lignes.reduce((min,l)=>(l.date_liv&&l.date_liv<min)?l.date_liv:min,lignes[0].date_liv||date_cmd)
+    ? lignes.reduce((min,l) => (l.date_liv && l.date_liv < min) ? l.date_liv : min, lignes[0].date_liv || date_cmd)
     : date_cmd;
-  if (!cp_liv&&!lignes.length) return null;
-  return {id:uid(),source:'pdf',num_commande,date_cmd,
-    date_import:new Date().toISOString(),
-    client:client||'Client inconnu',
-    adresse_liv:'',cp_liv,ville_liv,date_liv,lignes,statut:'en_attente'};
+
+  if (!cp_liv && !lignes.length) return null;
+
+  return {
+    id: uid(), source: 'pdf', num_commande, date_cmd,
+    date_import: new Date().toISOString(),
+    client: client || 'Client inconnu',
+    adresse_liv: '', cp_liv, ville_liv, date_liv, lignes,
+    statut: 'en_attente',
+    debug: debugRef, // affiché si 0 ligne
+  };
 }
 
 function parseFrDateARC(str) {
