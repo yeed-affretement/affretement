@@ -4114,22 +4114,25 @@ function parseARCText(text, filename) {
   const allDatesAll = [...t.matchAll(/(\d{2}\/\d{2}\/\d{4})/g)];
   const lineDates = allDatesAll.slice(1); // skip date commande
 
-  // 3. Quantités depuis texte RAW — "N N N ,0 0 0" ou "N N N , 0 0 0" ou "NNN,000"
-  // La virgule peut ou non être entourée d'espaces dans le PDF DIVALTO
-  const rawQtyPattern = /(\d(?:\s\d){0,5})\s*,\s*(\d(?:\s\d){2})\b/g;
+  // 3. Quantités DIVALTO — toujours format NNN,000 (décimales = zéro)
+  // Les prix ont des décimales non nulles (ex: 1,760 ou 0,44)
+  // Pattern flexible : digits continus OU espacés, virgule, puis 3 digits (continus ou espacés)
+  const rawQtyPattern = /(\d[\d\s]{0,10}\d|\d)\s*[,]\s*(\d[\d\s]{0,4}\d|\d\d\d)\b/g;
   const qtysRaw = [];
   for (const m of raw.matchAll(rawQtyPattern)) {
     const intPart = parseInt(m[1].replace(/\s/g,''));
     const decPart = m[2].replace(/\s/g,'');
     if (decPart.length !== 3) continue;
-    const val = parseFloat(`${intPart}.${decPart}`);
-    if (val > 1) qtysRaw.push({ val: Math.round(val), rawIdx: m.index });
+    // Seules les quantités ont des décimales = 0 (format DIVALTO: 100,000 = 100 unités)
+    if (parseInt(decPart) !== 0) continue;
+    if (intPart < 1) continue;
+    qtysRaw.push({ val: intPart, rawIdx: m.index });
   }
-  // Compléter avec les quantités du texte compacté si raw n'a rien trouvé
+  // Compléter depuis texte compacté si raw n'a rien trouvé
   if (!qtysRaw.length) {
-    for (const m of t.matchAll(/\b(\d{1,6}),(\d{3})\b/g)) {
-      const val = Math.round(parseFloat(`${m[1]}.${m[2]}`));
-      if (val > 1) qtysRaw.push({ val, rawIdx: m.index * 2 });
+    for (const m of t.matchAll(/\b(\d{1,6}),000\b/g)) {
+      const val = parseInt(m[1]);
+      if (val >= 1) qtysRaw.push({ val, rawIdx: m.index * 2 });
     }
   }
   qtysRaw.sort((a,b) => a.rawIdx - b.rawIdx);
