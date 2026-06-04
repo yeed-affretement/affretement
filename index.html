@@ -2831,15 +2831,18 @@ async function syncOutlookReplies(consultId = null) {
     return;
   }
 
-  // Fetch last 30 days, triés par date décroissante (les plus récents en premier)
-  const since = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+  // Lire uniquement la Boîte de réception (pas les éléments envoyés)
   const fields = 'id,subject,from,receivedDateTime,body,isRead';
   const mailbox = encodeURIComponent(cfg.mailboxEmail);
-  const orderby = encodeURIComponent('receivedDateTime desc');
+  const order = encodeURIComponent('receivedDateTime desc');
+  const since = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
   const endpoints = [
-    `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/Inbox/messages?$filter=receivedDateTime ge ${since}&$select=${fields}&$top=200&$orderby=${orderby}`,
-    `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/inbox/messages?$select=${fields}&$top=200&$orderby=${orderby}`,
-    `https://graph.microsoft.com/v1.0/users/${mailbox}/messages?$filter=receivedDateTime ge ${since}&$select=${fields}&$top=200`,
+    // Inbox uniquement, 200 plus récents
+    `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/Inbox/messages?$select=${fields}&$top=200&$orderby=${order}`,
+    // Inbox avec filtre date
+    `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/Inbox/messages?$filter=receivedDateTime ge ${since}&$select=${fields}&$top=200`,
+    // Fallback inbox minuscule
+    `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/inbox/messages?$select=${fields}&$top=200`,
   ];
 
   let messages = [];
