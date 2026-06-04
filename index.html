@@ -3111,25 +3111,23 @@ function applySyncResults() {
   const toImport = pendingSyncResults.filter(r => !r._skip);
   let count = 0;
   const today = new Date().toISOString().slice(0, 10);
+  const debugLog = [];
 
   for (const r of toImport) {
     const c = getConsult(r.consultId);
-    if (!c) continue;
-    // Trouver l'affréteur : d'abord par email exact, sinon par domaine (@mumnet.com)
+    if (!c) { debugLog.push(`❌ Consultation ${r.consultId} introuvable`); continue; }
+
+    // Trouver l'affréteur : email exact, puis domaine
     let aff = affréteurs.find(a => a.email?.toLowerCase() === r.from?.toLowerCase());
     if (!aff && r.from) {
       const fromDomain = r.from.split('@')[1]?.toLowerCase();
       if (fromDomain) {
-        // Chercher parmi les affréteurs consultés pour cette consultation
-        aff = affréteurs.find(a => {
-          const affDomain = (a.email || '').split('@')[1]?.toLowerCase();
-          return affDomain === fromDomain && c.affréteurs_consultés?.includes(a.id);
-        });
-        // Fallback : n'importe quel affréteur avec ce domaine
-        if (!aff) aff = affréteurs.find(a => (a.email || '').split('@')[1]?.toLowerCase() === fromDomain);
+        aff = affréteurs.find(a => (a.email || '').split('@')[1]?.toLowerCase() === fromDomain);
+        if (aff) debugLog.push(`✅ Affréteur trouvé par domaine @${fromDomain} : ${aff.nom}`);
+        else debugLog.push(`❌ Aucun affréteur avec domaine @${fromDomain} — domaines dispo: ${affréteurs.map(a=>(a.email||'').split('@')[1]).filter(Boolean).join(', ')}`);
       }
     }
-    if (!aff) { continue; } // affréteur introuvable même par domaine
+    if (!aff) { debugLog.push(`❌ Affréteur introuvable pour ${r.from}`); continue; }
 
     const dCreation = c.date_creation ? new Date(c.date_creation) : null;
     const dReceived = r.receivedAt ? new Date(r.receivedAt) : new Date();
@@ -3171,7 +3169,7 @@ function applySyncResults() {
     updateNavBadges();
     alert(`✅ ${count} réponse(s) importée(s) avec succès.`);
   } else {
-    alert('Aucune réponse importée.\n\nCause possible : l\'adresse email des affréteurs dans leurs réponses ne correspond pas à celle enregistrée dans la base affréteurs de YEED Affrètement.');
+    alert('Aucune réponse importée.\n\n' + (debugLog.length ? debugLog.join('\n') : 'Cause inconnue.'));
   }
   renderSyncHistory();
 }
