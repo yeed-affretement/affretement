@@ -3115,8 +3115,21 @@ function applySyncResults() {
   for (const r of toImport) {
     const c = getConsult(r.consultId);
     if (!c) continue;
-    const aff = affréteurs.find(a => a.email?.toLowerCase() === r.from?.toLowerCase());
-    if (!aff) { continue; } // skip if broker unrecognized
+    // Trouver l'affréteur : d'abord par email exact, sinon par domaine (@mumnet.com)
+    let aff = affréteurs.find(a => a.email?.toLowerCase() === r.from?.toLowerCase());
+    if (!aff && r.from) {
+      const fromDomain = r.from.split('@')[1]?.toLowerCase();
+      if (fromDomain) {
+        // Chercher parmi les affréteurs consultés pour cette consultation
+        aff = affréteurs.find(a => {
+          const affDomain = (a.email || '').split('@')[1]?.toLowerCase();
+          return affDomain === fromDomain && c.affréteurs_consultés?.includes(a.id);
+        });
+        // Fallback : n'importe quel affréteur avec ce domaine
+        if (!aff) aff = affréteurs.find(a => (a.email || '').split('@')[1]?.toLowerCase() === fromDomain);
+      }
+    }
+    if (!aff) { continue; } // affréteur introuvable même par domaine
 
     const dCreation = c.date_creation ? new Date(c.date_creation) : null;
     const dReceived = r.receivedAt ? new Date(r.receivedAt) : new Date();
