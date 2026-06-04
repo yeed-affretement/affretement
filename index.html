@@ -4089,29 +4089,57 @@ function parseARCText(text, filename) {
   const date_cmd = allDates[0] ? parseFrDateARC(allDates[0][1]) : new Date().toISOString().slice(0,10);
 
   // === ÉTAPE 6 : lignes produits ===
-  // PDF.js DIVALTO : DESCRIPTION -> DATE -> QTY -> PRICE -> TOTAL -> REF
+  // Chercher les refs dans le texte RAW (chiffres espacés: "2 1 0 3 0 7")
+  // Évite le problème de fusion de chiffres adjacents par la compaction
   const lignes = [];
-  const allRefs = [...t.matchAll(/\b([12]1\d{4})\b/g)];
-  const allQtys = [...t.matchAll(/\b(\d{1,6}),(\d{3})\b/g)];
-  const debugRef = `refs:${allRefs.map(r=>r[1]).join(',')||'aucune'} qtys:${allQtys.length}`;
 
-  for (const refMatch of allRefs) {
-    const ref = parseInt(refMatch[1]);
-    const refPos = refMatch.index;
-    if (ref < 110000 || ref > 219999) continue;
-    const winStart = Math.max(0, refPos - 400);
-    const win = t.slice(winStart, refPos + 50);
+  // Pattern : 6 chiffres espacés, démarrant par [12] puis 1
+  // Ex: "2 1 0 3 0 7" ou "1 1 0 3 2 7"
+  const refRawPattern = /(?:^|[\s,])([12])\s(1)\s(\d)\s(\d)\s(\d)\s(\d)(?=[\s,]|$)/g;
+  const refsFromRaw = [];
+  for (const m of raw.matchAll(refRawPattern)) {
+    const refVal = parseInt(`${m[1]}${m[2]}${m[3]}${m[4]}${m[5]}${m[6]}`);
+    if (refVal >= 110000 && refVal <= 219999) {
+      refsFromRaw.push({ ref: refVal, rawIndex: m.index });
+    }
+  }
+
+  // Fallback : chercher aussi dans le texte compacté (ex si ref bien isolée)
+  const refsFromCompact = [...t.matchAll(/(?<!\d)([12]1\d{4})(?!\d)/g)]
+    .map(m => ({ ref: parseInt(m[1]), compactIndex: m.index }))
+    .filter(r => r.ref >= 110000 && r.ref <= 219999);
+
+  // Combiner et dédupliquer
+  const allRefVals = new Map();
+  refsFromRaw.forEach(r => { if (!allRefVals.has(r.ref)) allRefVals.set(r.ref, { rawIndex: r.rawIndex }); });
+  refsFromCompact.forEach(r => { if (!allRefVals.has(r.ref)) allRefVals.set(r.ref, { compactIndex: r.compactIndex }); });
+
+  const allQtys = [...t.matchAll(/\b(\d{1,6}),(\d{3})\b/g)];
+  const debugRef = `refs:${[...allRefVals.keys()].join(',')||'aucune'} qtys:${allQtys.length}`;
+
+  for (const [ref, pos] of allRefVals) {
+    // Position approximative dans t : rawIndex / 2 (chaque char brut ≈ 2 chars avec espace)
+    const approxPos = pos.compactIndex !== undefined
+      ? pos.compactIndex
+      : Math.floor((pos.rawIndex || 0) / 2);
+    const winStart = Math.max(0, approxPos - 400);
+    const winEnd = Math.min(t.length, approxPos + 200);
+    const win = t.slice(winStart, winEnd);
+
     if (win.toLowerCase().includes('ecotaxe')) continue;
+
+    // Date de livraison dans la fenêtre
     const datesInWin = [...win.matchAll(/(\d{2}\/\d{2}\/\d{4})/g)];
     if (!datesInWin.length) continue;
     const dateLiv = parseFrDateARC(datesInWin[0][1]);
-    // Quantités dans la fenêtre avant la référence
-    const qtysInWin = allQtys.filter(q => q.index >= winStart && q.index < refPos);
+
+    // Quantité : la plus grande dans la fenêtre (exclut prix unitaires)
+    const qtysInWin = allQtys.filter(q => q.index >= winStart && q.index < winStart + win.length);
     if (!qtysInWin.length) continue;
-    // Prendre la plus grande quantité (exclut les prix unitaires faibles)
     const bestQty = qtysInWin.reduce((a,b) => parseInt(a[1]) >= parseInt(b[1]) ? a : b);
     const qty = Math.round(parseFloat(bestQty[1] + '.' + bestQty[2]));
     if (!qty || qty <= 0) continue;
+
     const prod = YEED_PRODUCTS[ref];
     const calc = calculerLignePalettes(ref, qty);
     lignes.push({ ref: String(ref), desc: prod?.desc || `Réf ${ref}`, qty, date_liv: dateLiv, ...calc });
@@ -4129,7 +4157,7 @@ function parseARCText(text, filename) {
     client: client || 'Client inconnu',
     adresse_liv: '', cp_liv, ville_liv, date_liv, lignes,
     statut: 'en_attente',
-    debug: debugRef, // affiché si 0 ligne
+    debug: debugRef,
   };
 }
 
