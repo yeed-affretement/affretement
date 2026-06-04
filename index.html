@@ -1582,7 +1582,8 @@ async function sendGraphMail(token, toEmail, toName, subject, bodyText) {
 async function sendOneEmailViaGraph(consultId, affId) {
   const c = getConsult(consultId);
   const aff = getAff(affId);
-  if (!c || !aff) return;
+  if (!c) { alert('Consultation introuvable (ID: ' + consultId + ')'); return; }
+  if (!aff) { alert('Affréteur introuvable (ID: ' + affId + ')'); return; }
 
   const statusEl = document.getElementById('email-status-' + affId);
   const rowEl = document.getElementById('email-row-' + affId);
@@ -1591,11 +1592,15 @@ async function sendOneEmailViaGraph(consultId, affId) {
   const sig = c.signataire || localStorage.getItem('signataire') || 'Service affrètement YEED';
   const dateLimite = c.date_limite_reponse ? `avant le ${formatDate(c.date_limite_reponse)}` : '';
   const subject = `Demande de cotation affrètement routier — ${c.reference} — ${c.enl_ville} → ${c.liv_ville}`;
-  const body = buildEmailBody(c, sig, dateLimite).replace('[NOM_CONTACT]', aff.contact);
+  const body = buildEmailBody(c, sig, dateLimite).replace('[NOM_CONTACT]', aff.contact || aff.nom);
 
   try {
     const token = await getMailToken();
-    if (!token) { if (statusEl) statusEl.textContent = '❌ Non connecté'; return; }
+    if (!token) {
+      alert('Impossible d\'obtenir le token Microsoft. Reconnectez-vous dans ⚙️ Paramètres.');
+      if (statusEl) statusEl.textContent = '❌ Token manquant';
+      return;
+    }
     await sendGraphMail(token, aff.email, aff.contact || aff.nom, subject, body);
     if (!c.emails_envoyés) c.emails_envoyés = {};
     c.emails_envoyés[affId] = new Date().toISOString();
@@ -1604,8 +1609,9 @@ async function sendOneEmailViaGraph(consultId, affId) {
     if (statusEl) statusEl.textContent = '✅ Envoyé';
     showToast('✅ Email envoyé à ' + aff.nom);
   } catch(e) {
-    if (statusEl) statusEl.textContent = '❌ Erreur : ' + e.message;
-    showToast('❌ Erreur envoi : ' + e.message, 'error');
+    const msg = e.message || String(e);
+    if (statusEl) statusEl.textContent = '❌ ' + msg;
+    alert('Erreur envoi email :\n' + msg);
   }
 }
 
