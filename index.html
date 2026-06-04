@@ -314,7 +314,7 @@
           <div>
             <div class="card mb-20">
               <div class="form-section-title">📦 Marchandise</div>
-              <div class="form-grid">
+              <div class="form-grid" style="margin-bottom:12px;">
                 <div class="form-group">
                   <label>Nature de la marchandise *</label>
                   <input type="text" name="nature" required placeholder="Ex: Plots de terrasse" value="Plots de terrasse">
@@ -324,21 +324,33 @@
                   <input type="number" name="poids_kg" required min="1" placeholder="Ex: 4500">
                 </div>
                 <div class="form-group">
-                  <label>Nombre de palettes *</label>
-                  <input type="number" name="nb_palettes" required min="1" placeholder="Ex: 18">
-                </div>
-                <div class="form-group">
-                  <label>Dimensions palette</label>
-                  <input type="text" name="type_palette" placeholder="Ex: EUR 80x120, hauteur 180 cm">
-                </div>
-                <div class="form-group">
                   <label>Valeur marchandise (€)</label>
                   <input type="number" name="valeur_euro" placeholder="Pour info assurance">
                 </div>
               </div>
-              <div style="display:flex;gap:20px;margin-top:12px;">
+
+              <!-- Lignes palettes multiples -->
+              <div style="margin-bottom:10px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                  <label style="font-weight:600;font-size:13px;">Détail des palettes *</label>
+                  <button type="button" class="btn btn-outline btn-xs" onclick="addLignePaletteForm()">+ Ajouter une ligne</button>
+                </div>
+                <div id="lignes-palettes-form">
+                  <div class="ligne-palette-row" style="display:grid;grid-template-columns:80px 1fr 32px;gap:6px;margin-bottom:6px;align-items:center;">
+                    <input type="number" name="pal_nb[]" placeholder="Nb" min="1" required style="padding:7px;border:1px solid var(--border);border-radius:6px;font-size:13px;" oninput="updateTotalPalettes()">
+                    <input type="text" name="pal_dim[]" placeholder="Dimensions (ex: 80x120, H:180cm)" style="padding:7px;border:1px solid var(--border);border-radius:6px;font-size:13px;">
+                    <button type="button" onclick="removeLignePaletteForm(this)" style="padding:4px 8px;border:1px solid var(--border);border-radius:5px;background:#fff;cursor:pointer;color:var(--danger);">✕</button>
+                  </div>
+                </div>
+                <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">
+                  Total : <strong id="total-palettes-display">0</strong> palette(s)
+                  <input type="hidden" name="nb_palettes" id="nb-palettes-hidden" value="0">
+                  <input type="hidden" name="type_palette" id="type-palette-hidden" value="">
+                </div>
+              </div>
+
+              <div style="display:flex;gap:20px;margin-top:8px;">
                 <div class="checkbox-group"><input type="checkbox" name="hayon" id="cb-hayon"><label for="cb-hayon" style="cursor:pointer;font-size:13px;color:var(--text);">🔧 Hayon requis</label></div>
-                <div class="checkbox-group"><input type="checkbox" name="double_equip" id="cb-de"><label for="cb-de" style="cursor:pointer;font-size:13px;color:var(--text);">👨‍✈️ Double équipage</label></div>
                 <div class="checkbox-group"><input type="checkbox" name="tautliner" id="cb-tl"><label for="cb-tl" style="cursor:pointer;font-size:13px;color:var(--text);">🚛 Tautliner — chargement/déchargement sur le côté</label></div>
               </div>
             </div>
@@ -1168,8 +1180,67 @@ function selectAllAffréteurs() {
   document.querySelectorAll('[name=aff_sel]').forEach(cb => cb.checked = true);
 }
 
+function addLignePaletteForm() {
+  const container = document.getElementById('lignes-palettes-form');
+  const div = document.createElement('div');
+  div.className = 'ligne-palette-row';
+  div.style.cssText = 'display:grid;grid-template-columns:80px 1fr 32px;gap:6px;margin-bottom:6px;align-items:center;';
+  div.innerHTML = `
+    <input type="number" name="pal_nb[]" placeholder="Nb" min="1" style="padding:7px;border:1px solid var(--border);border-radius:6px;font-size:13px;" oninput="updateTotalPalettes()">
+    <input type="text" name="pal_dim[]" placeholder="Dimensions (ex: 80x120, H:180cm)" style="padding:7px;border:1px solid var(--border);border-radius:6px;font-size:13px;">
+    <button type="button" onclick="removeLignePaletteForm(this)" style="padding:4px 8px;border:1px solid var(--border);border-radius:5px;background:#fff;cursor:pointer;color:var(--danger);">✕</button>`;
+  container.appendChild(div);
+}
+
+function removeLignePaletteForm(btn) {
+  const rows = document.querySelectorAll('#lignes-palettes-form .ligne-palette-row');
+  if (rows.length <= 1) return; // garder au moins 1 ligne
+  btn.closest('.ligne-palette-row').remove();
+  updateTotalPalettes();
+}
+
+function updateTotalPalettes() {
+  const nbs = [...document.querySelectorAll('#lignes-palettes-form input[name="pal_nb[]"]')];
+  const dims = [...document.querySelectorAll('#lignes-palettes-form input[name="pal_dim[]"]')];
+  let total = 0;
+  const parts = [];
+  nbs.forEach((inp, i) => {
+    const n = parseInt(inp.value) || 0;
+    const d = dims[i]?.value?.trim() || '';
+    total += n;
+    if (n > 0) parts.push(d ? `${n} pal. ${d}` : `${n} pal.`);
+  });
+  const display = document.getElementById('total-palettes-display');
+  if (display) display.textContent = total;
+  const hidden = document.getElementById('nb-palettes-hidden');
+  if (hidden) hidden.value = total;
+  const typeHidden = document.getElementById('type-palette-hidden');
+  if (typeHidden) typeHidden.value = parts.join(' + ');
+}
+
+function getPalettesDetail() {
+  const nbs = [...document.querySelectorAll('#lignes-palettes-form input[name="pal_nb[]"]')];
+  const dims = [...document.querySelectorAll('#lignes-palettes-form input[name="pal_dim[]"]')];
+  return nbs.map((inp, i) => ({
+    nb: parseInt(inp.value) || 0,
+    dim: dims[i]?.value?.trim() || ''
+  })).filter(l => l.nb > 0);
+}
+
+function resetPalettesForm() {
+  const container = document.getElementById('lignes-palettes-form');
+  if (!container) return;
+  container.innerHTML = `<div class="ligne-palette-row" style="display:grid;grid-template-columns:80px 1fr 32px;gap:6px;margin-bottom:6px;align-items:center;">
+    <input type="number" name="pal_nb[]" placeholder="Nb" min="1" style="padding:7px;border:1px solid var(--border);border-radius:6px;font-size:13px;" oninput="updateTotalPalettes()">
+    <input type="text" name="pal_dim[]" placeholder="Dimensions (ex: 80x120, H:180cm)" style="padding:7px;border:1px solid var(--border);border-radius:6px;font-size:13px;">
+    <button type="button" onclick="removeLignePaletteForm(this)" style="padding:4px 8px;border:1px solid var(--border);border-radius:5px;background:#fff;cursor:pointer;color:var(--danger);">✕</button>
+  </div>`;
+  updateTotalPalettes();
+}
+
 function resetForm() {
   document.getElementById('form-consultation').reset();
+  resetPalettesForm();
   renderNouvelleForm();
 }
 
@@ -1227,12 +1298,13 @@ function saveConsultation(e) {
     poids_kg: fd.get('poids_kg'),
     nb_palettes: fd.get('nb_palettes'),
     type_palette: fd.get('type_palette'),
+    lignes_palettes: getPalettesDetail(), // détail multi-lignes palettes
     hauteur_cm: fd.get('hauteur_cm'),
     valeur_euro: fd.get('valeur_euro'),
     hayon: fd.get('hayon') === 'on',
     adr: fd.get('adr') === 'on',
     temp_dirigee: fd.get('temp_dirigee') === 'on',
-    double_equip: fd.get('double_equip') === 'on',
+    double_equip: false,
     tautliner: fd.get('tautliner') === 'on',
     enl_adresse: fd.get('enl_adresse'),
     enl_cp: fd.get('enl_cp'),
@@ -1432,7 +1504,9 @@ Nous sollicitons votre meilleure cotation pour l'expédition suivante :
 ━━━ MARCHANDISE ━━━
 • Nature          : ${c.nature}
 • Poids total     : ${c.poids_kg} kg
-• Palettes        : ${c.nb_palettes} palette(s) ${c.type_palette}${c.hauteur_cm ? ` — hauteur max ${c.hauteur_cm} cm` : ''}
+• Palettes        : ${c.lignes_palettes && c.lignes_palettes.length > 0
+    ? c.lignes_palettes.map(l => `${l.nb} palette(s)${l.dim ? ' ' + l.dim : ''}`).join(' + ')
+    : `${c.nb_palettes} palette(s) ${c.type_palette || ''}`}${c.hauteur_cm ? ` — hauteur max ${c.hauteur_cm} cm` : ''}
 ${c.valeur_euro ? `• Valeur marchand.: ${formatPrice(c.valeur_euro)} (info assurance)\n` : ''}
 ━━━ ENLÈVEMENT ━━━
 • Adresse    : ${c.enl_adresse}
