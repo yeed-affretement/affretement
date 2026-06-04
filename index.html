@@ -1012,14 +1012,23 @@ python -m http.server 8080</div>
       <button class="close-btn" onclick="closeModal('modal-sync-results')">✕</button>
     </div>
     <div class="modal-body">
-      <div class="alert alert-warning mb-16" style="margin-bottom:16px;">
-        ⚠️ Vérifiez et corrigez les valeurs extraites automatiquement avant de confirmer l'import. Décochez les lignes erronées.
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+        <div class="alert alert-warning" style="margin:0;flex:1;">
+          ⚠️ Cochez les réponses à importer, décochez celles à ignorer.
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0;">
+          <button class="btn btn-outline btn-sm" onclick="setSyncSelectAll(true)">☑️ Tout cocher</button>
+          <button class="btn btn-outline btn-sm" onclick="setSyncSelectAll(false)">🔲 Tout décocher</button>
+        </div>
       </div>
       <div id="sync-results-body"></div>
     </div>
-    <div class="modal-footer">
-      <button class="btn btn-outline" onclick="closeModal('modal-sync-results');pendingSyncResults=[];">Annuler</button>
-      <button class="btn btn-success" onclick="applySyncResults()">✅ Importer les réponses sélectionnées</button>
+    <div class="modal-footer" style="justify-content:space-between;">
+      <div id="sync-results-count" style="font-size:12px;color:var(--text-muted);"></div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-outline" onclick="markEmailsSeen(pendingSyncResults.map(r=>r.msgId));closeModal('modal-sync-results');pendingSyncResults=[];">❌ Ne pas importer</button>
+        <button class="btn btn-success" onclick="applySyncResults()">✅ Importer la sélection</button>
+      </div>
     </div>
   </div>
 </div>
@@ -2849,10 +2858,12 @@ async function syncOutlookReplies(consultId = null) {
   }
 
   // Parse and match emails to consultations
+  // Ignorer tous les emails venant du domaine @yeedgroup.com (internes)
   const ownEmails = [
     cfg.mailboxEmail.toLowerCase(),
     ...(msalAccount?.username ? [msalAccount.username.toLowerCase()] : []),
   ];
+  const isInternalEmail = (email) => email.endsWith('@yeedgroup.com') || ownEmails.includes(email);
   // Sujets à ignorer : accusés d'échec, réponses automatiques, spam
   const IGNORE_SUBJECTS = ['undeliverable', 'non remis', 'delivery failed', 'delivery failure',
     'mailer-daemon', 'mail delivery', 'bounce', 'échec de remise', 'message non remis',
@@ -2865,8 +2876,8 @@ async function syncOutlookReplies(consultId = null) {
     if (isAlreadyImported(msg.id)) continue;
     const fromEmail = (msg.from?.emailAddress?.address || '').toLowerCase();
     const subject = (msg.subject || '').toLowerCase();
-    // Ignorer les emails envoyés par notre propre boîte (demandes sortantes)
-    if (ownEmails.includes(fromEmail)) continue;
+    // Ignorer tous les emails internes @yeedgroup.com
+    if (isInternalEmail(fromEmail)) continue;
     // Ignorer les accusés d'échec et réponses automatiques
     if (IGNORE_SUBJECTS.some(s => subject.includes(s))) continue;
     if (IGNORE_FROM.some(s => fromEmail.includes(s))) continue;
@@ -2915,7 +2926,18 @@ async function syncOutlookReplies(consultId = null) {
 }
 
 function isAlreadyImported(msgId) {
-  return consultations.some(c => (c.reponses || []).some(r => r.msg_id === msgId));
+  if (consultations.some(c => (c.reponses || []).some(r => r.msg_id === msgId))) return true;
+  // Aussi vérifier les emails déjà vus (même rejetés à l'import)
+  const seen = DB.get('seen_email_ids', []);
+  return seen.includes(msgId);
+}
+
+function markEmailsSeen(msgIds) {
+  const seen = new Set(DB.get('seen_email_ids', []));
+  msgIds.forEach(id => seen.add(id));
+  // Garder seulement les 500 derniers pour éviter la surcharge
+  const arr = [...seen].slice(-500);
+  DB.set('seen_email_ids', arr);
 }
 
 function matchEmailToConsultation(subject, fromEmail, targetConsultId = null) {
@@ -2996,6 +3018,7 @@ function parseEmailBody(html) {
 function renderSyncResultsModal() {
   const body = document.getElementById('sync-results-body');
   if (!body) return;
+  updateSyncCount();
 
   if (pendingSyncResults.length === 0) {
     body.innerHTML = `<div class="empty-state"><div class="es-icon">✅</div><div class="es-title">Aucune nouvelle réponse détectée</div></div>`;
@@ -3051,6 +3074,19 @@ function toggleSyncItem(idx, checked) {
   if (card) card.style.opacity = checked ? '1' : '0.4';
 }
 
+function setSyncSelectAll(checked) {
+  pendingSyncResults.forEach(r => r._skip = !checked);
+  renderSyncResultsModal();
+}
+
+function updateSyncCount() {
+  const el = document.getElementById('sync-results-count');
+  if (!el) return;
+  const total = pendingSyncResults.length;
+  const selected = pendingSyncResults.filter(r => !r._skip).length;
+  el.textContent = `${selected} / ${total} email(s) sélectionné(s)`;
+}
+
 function applySyncResults() {
   const toImport = pendingSyncResults.filter(r => !r._skip);
   let count = 0;
@@ -3091,6 +3127,8 @@ function applySyncResults() {
   }
 
   save();
+  // Marquer tous les emails comme vus (importés ou non) pour ne plus les revoir
+  markEmailsSeen(pendingSyncResults.map(r => r.msgId));
   closeModal('modal-sync-results');
   pendingSyncResults = [];
 
