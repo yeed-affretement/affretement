@@ -4114,29 +4114,26 @@ function parseARCText(text, filename) {
   const allDatesAll = [...t.matchAll(/(\d{2}\/\d{2}\/\d{4})/g)];
   const lineDates = allDatesAll.slice(1); // skip date commande
 
-  // 3. Quantités DIVALTO — toujours format NNN,000 (décimales = zéro)
-  // Les prix ont des décimales non nulles (ex: 1,760 ou 0,44)
-  // Pattern flexible : digits continus OU espacés, virgule, puis 3 digits (continus ou espacés)
-  const rawQtyPattern = /(\d[\d\s]{0,10}\d|\d)\s*[,]\s*(\d[\d\s]{0,4}\d|\d\d\d)\b/g;
-  const qtysRaw = [];
-  for (const m of raw.matchAll(rawQtyPattern)) {
-    const intPart = parseInt(m[1].replace(/\s/g,''));
-    const decPart = m[2].replace(/\s/g,'');
-    if (decPart.length !== 3) continue;
-    // Seules les quantités ont des décimales = 0 (format DIVALTO: 100,000 = 100 unités)
-    if (parseInt(decPart) !== 0) continue;
-    if (intPart < 1) continue;
-    qtysRaw.push({ val: intPart, rawIdx: m.index });
+  // 3. Quantités DIVALTO — format EXACT "NNN,000" (3 zéros décimaux = unités commandées)
+  // Les prix ont des décimales non nulles (1,7600 ; 0,9800 ; etc.)
+  // Chercher dans le texte compacté t (après normalisation virgule)
+  const qtysCompact = [];
+  // Pattern 1 : "NNN,000" compact (items PDF.js sans espaces internes)
+  for (const m of t.matchAll(/\b(\d{1,6}),000\b/g)) {
+    const val = parseInt(m[1]);
+    if (val >= 1) qtysCompact.push({ val, pos: m.index });
   }
-  // Compléter depuis texte compacté si raw n'a rien trouvé
-  if (!qtysRaw.length) {
-    for (const m of t.matchAll(/\b(\d{1,6}),000\b/g)) {
-      const val = parseInt(m[1]);
-      if (val >= 1) qtysRaw.push({ val, rawIdx: m.index * 2 });
+  // Pattern 2 : raw "N N N ,0 0 0" ou "N N N ,000" (items PDF.js avec espaces)
+  if (!qtysCompact.length) {
+    // Chercher dans le texte brut : digits espacés + virgule + "000" ou "0 0 0"
+    for (const m of raw.matchAll(/(\d(?:\s\d){0,5})\s*,\s*0\s*0\s*0\b/g)) {
+      const val = parseInt(m[1].replace(/\s/g,''));
+      if (val >= 1) qtysCompact.push({ val, pos: m.index });
     }
   }
-  qtysRaw.sort((a,b) => a.rawIdx - b.rawIdx);
-  const lineQtys = qtysRaw;
+  qtysCompact.sort((a,b) => a.pos - b.pos);
+  const lineQtys = qtysCompact;
+  const debugRef = `refs:${refsOrdered.map(r=>r.ref).join(',')||'aucune'} qtys:${lineQtys.length} dates:${lineDates.length}`;
 
   const debugRef = `refs:${refsOrdered.map(r=>r.ref).join(',')||'aucune'} qtys:${lineQtys.length} dates:${lineDates.length}`;
 
@@ -4153,8 +4150,9 @@ function parseARCText(text, filename) {
     const qty = qtyEntry.val;
     if (!qty || qty <= 0) continue;
     const prod = YEED_PRODUCTS[ref];
+    const ca
     const calc = calculerLignePalettes(ref, qty);
-    lignes.push({ ref: String(ref), desc: prod?.desc || `Réf ${ref}`, qty, date_liv: dateLiv, ...calc });
+    lignes.push({ ref: String(ref), desc: prod?.desc || `Ref ${ref}`, qty, date_liv: dateLiv, ...calc });
   }
 
   const date_liv = lignes.length
@@ -4168,16 +4166,15 @@ function parseARCText(text, filename) {
     date_import: new Date().toISOString(),
     client: client || 'Client inconnu',
     adresse_liv: '', cp_liv, ville_liv, date_liv, lignes,
-    statut: 'en_attente',
-    debug: debugRef,
+    statut: 'en_attente', debug: dbg,
   };
 }
 
 function parseFrDateARC(str) {
   if (!str) return '';
   const p = str.split('/');
-  if (p.length!==3) return str;
-  return `${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`;
+  if (p.length !== 3) return str;
+  return p[2] + '-' + p[1].padStart(2,'0') + '-' + p[0].padStart(2,'0');
 }
 
 updatePlanBadge();
