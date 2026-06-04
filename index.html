@@ -2035,6 +2035,7 @@ function addDeletedId(id) {
   const ids = getDeletedIds();
   ids.add(id);
   DB.set('deleted_ids', [...ids]);
+  _lastDeleteTime = Date.now(); // cooldown anti-pull après suppression
 }
 
 function deleteAffréteur(id) {
@@ -2381,6 +2382,8 @@ async function saveToSharepoint() {
 async function pullFromSharepoint(manual = false) {
   if (!getSpConfig().siteUrl) { if (manual) alert('Configurez d\'abord l\'URL SharePoint dans ⚙️ Paramètres.'); return; }
   if (!msalAccount) { if (manual) { msalLogin(); } return; }
+  // Cooldown 30s après une suppression pour laisser le temps au push de se propager
+  if (!manual && (Date.now() - _lastDeleteTime) < 30000) return;
 
   updateSpStatus('loading');
   const remote = await loadFromSharepoint();
@@ -3015,17 +3018,20 @@ function applySyncResults() {
   renderSyncHistory();
 }
 
+let _lastDeleteTime = 0; // timestamp de la dernière suppression
+
 function startAutoSync() {
   const cfg = getMsalConfig();
   if (!cfg.syncInterval || cfg.syncInterval <= 0) return;
   stopAutoSync();
-  const intervalMs = Math.max(30000, cfg.syncInterval * 60 * 1000); // min 30s
+  const intervalMs = Math.max(30000, cfg.syncInterval * 60 * 1000);
   syncTimer = setInterval(() => {
-    if (msalAccount) {
-      pullFromSharepoint(); // sync données SharePoint (partagées entre collègues)
-    }
+    if (!msalAccount) return;
+    // Auto-sync : PUSH uniquement (sauvegarde vers SharePoint)
+    // Le pull ne se fait que manuellement ou au chargement pour éviter les conflits de suppression
+    saveToSharepoint();
   }, intervalMs);
-  console.log(`Auto-sync every ${intervalMs/1000}s.`);
+  console.log(`Auto-push every ${intervalMs/1000}s.`);
 }
 
 function stopAutoSync() {
