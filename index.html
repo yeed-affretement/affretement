@@ -1026,7 +1026,7 @@ python -m http.server 8080</div>
     <div class="modal-footer" style="justify-content:space-between;">
       <div id="sync-results-count" style="font-size:12px;color:var(--text-muted);"></div>
       <div style="display:flex;gap:8px;">
-        <button class="btn btn-outline" onclick="markEmailsSeen(pendingSyncResults.map(r=>r.msgId));closeModal('modal-sync-results');pendingSyncResults=[];">❌ Ne pas importer</button>
+        <button class="btn btn-outline" onclick="closeModal('modal-sync-results');pendingSyncResults=[];">Fermer</button>
         <button class="btn btn-success" onclick="applySyncResults()">✅ Importer la sélection</button>
       </div>
     </div>
@@ -2926,10 +2926,8 @@ async function syncOutlookReplies(consultId = null) {
 }
 
 function isAlreadyImported(msgId) {
-  if (consultations.some(c => (c.reponses || []).some(r => r.msg_id === msgId))) return true;
-  // Aussi vérifier les emails déjà vus (même rejetés à l'import)
-  const seen = DB.get('seen_email_ids', []);
-  return seen.includes(msgId);
+  // Un email est "déjà traité" uniquement s'il a été importé dans une réponse
+  return consultations.some(c => (c.reponses || []).some(r => r.msg_id === msgId));
 }
 
 function markEmailsSeen(msgIds) {
