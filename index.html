@@ -1499,39 +1499,79 @@ function openEmailModal(consultId) {
 }
 
 function buildEmailBody(c, sig, dateLimite) {
+  // Retourne le texte brut (pour aperçu dans l'app)
   const opts = [];
   if (c.hayon) opts.push('Hayon requis');
   if (c.adr) opts.push('Matières dangereuses (ADR)');
   if (c.temp_dirigee) opts.push('Température dirigée');
-  if (c.double_equip) opts.push('Double équipage');
-  if (c.tautliner) opts.push('🚛 Tautliner (chargement latéral)');
+  if (c.tautliner) opts.push('Tautliner (chargement latéral)');
+
+  const palettes = c.lignes_palettes && c.lignes_palettes.length > 0
+    ? c.lignes_palettes.map(l => `${l.nb} palette(s)${l.dim ? ' ' + l.dim : ''}`).join(' + ')
+    : `${c.nb_palettes} palette(s) ${c.type_palette || ''}`;
+
+  const obsBlock = [...(opts.length ? [`Options : ${opts.join(', ')}`] : []),
+    ...(c.observations ? [c.observations] : [])].join('\n');
 
   return `Bonjour [NOM_CONTACT],
 
 Nous sollicitons votre meilleure cotation pour l'expédition suivante :
 
 ━━━ MARCHANDISE ━━━
-• Nature          : ${c.nature}
-• Poids total     : ${c.poids_kg} kg
-• Palettes        : ${c.lignes_palettes && c.lignes_palettes.length > 0
-    ? c.lignes_palettes.map(l => `${l.nb} palette(s)${l.dim ? ' ' + l.dim : ''}`).join(' + ')
-    : `${c.nb_palettes} palette(s) ${c.type_palette || ''}`}${c.hauteur_cm ? ` — hauteur max ${c.hauteur_cm} cm` : ''}
-${c.valeur_euro ? `• Valeur marchand.: ${formatPrice(c.valeur_euro)} (info assurance)\n` : ''}
+• Nature     : ${c.nature}
+• Poids      : ${c.poids_kg} kg
+• Palettes   : ${palettes}
+${c.valeur_euro ? `• Valeur     : ${formatPrice(c.valeur_euro)} (info assurance)\n` : ''}
 ━━━ ENLÈVEMENT ━━━
-• Adresse    : ${c.enl_adresse}
-• Code postal : ${c.enl_cp} ${c.enl_ville} (${c.enl_pays})
-• Date       : ${formatDate(c.enl_date)}${c.enl_horaires ? ` — Horaires : ${c.enl_horaires}` : ''}
-
+• ${c.enl_adresse}, ${c.enl_cp} ${c.enl_ville} (${c.enl_pays})
+${c.enl_horaires ? `• Horaires : ${c.enl_horaires}` : ''}
 ━━━ LIVRAISON ━━━
-• Adresse    : ${c.liv_adresse}
-• Code postal : ${c.liv_cp} ${c.liv_ville} (${c.liv_pays})
-• Date       : ${formatDate(c.liv_date)}${c.liv_horaires ? ` — Horaires : ${c.liv_horaires}` : ''}
-${opts.length ? `\n━━━ OPTIONS ━━━\n${opts.map(o=>'• '+o).join('\n')}\n` : ''}${c.observations ? `\n━━━ OBSERVATIONS ━━━\n${c.observations}\n` : ''}
+• ${c.liv_adresse}, ${c.liv_cp} ${c.liv_ville} (${c.liv_pays})
+${c.liv_horaires ? `• Horaires : ${c.liv_horaires}` : ''}
+${obsBlock ? `\n━━━ INFORMATIONS COMPLÉMENTAIRES ━━━\n${obsBlock}\n` : ''}
 Merci de nous faire parvenir votre meilleure offre ${dateLimite}.
-Précisez : prix HT, délai de transit et vos disponibilités.
+Précisez dans votre réponse :
+• Prix HT
+• Délai de transit
+• Disponibilité
+• Date de chargement souhaitée
+• Date de livraison estimée
 
 Cordialement,
 ${sig}${buildSigTel()}`;
+}
+
+function buildEmailHtml(c, sig, dateLimite) {
+  // Version HTML avec logo YEED pour l'envoi par email
+  const textBody = buildEmailBody(c, sig, dateLimite);
+  const htmlContent = textBody
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/━━━([^━]+)━━━/g, '<br><strong style="color:#1e40af;">$1</strong><br>')
+    .replace(/\n/g, '<br>');
+
+  const sigHtml = `
+    <br><br>
+    <table style="border-top:2px solid #1e40af;padding-top:12px;font-family:Arial,sans-serif;font-size:13px;color:#1e293b;">
+      <tr>
+        <td style="padding-right:16px;vertical-align:middle;">
+          <img src="https://www.yeedgroup.com/wp-content/uploads/2022/03/YEED-logo-couleur.png"
+               alt="YEED" style="height:40px;width:auto;"
+               onerror="this.style.display='none'">
+        </td>
+        <td style="vertical-align:middle;border-left:2px solid #e2e8f0;padding-left:14px;">
+          <strong style="font-size:14px;color:#1e40af;">${sig}</strong><br>
+          <span style="color:#64748b;">Service Affrètement — YEED GROUP</span><br>
+          <span style="color:#64748b;">📞 ${buildSigTel().replace('Tél. : ','')}</span><br>
+          <span style="color:#64748b;">✉️ affretement@yeedgroup.com</span><br>
+          <a href="https://www.yeedgroup.com" style="color:#1e40af;text-decoration:none;">www.yeedgroup.com</a>
+        </td>
+      </tr>
+    </table>`;
+
+  return `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#1e293b;max-width:680px;">
+    ${htmlContent}
+    ${sigHtml}
+  </div>`;
 }
 
 function exportData() {
@@ -1625,7 +1665,7 @@ async function getMailToken() {
   }
 }
 
-async function sendGraphMail(token, toEmail, toName, subject, bodyText) {
+async function sendGraphMail(token, toEmail, toName, subject, bodyText, bodyHtml = null) {
   const cfg = getMsalConfig();
   const sharedMailbox = cfg.mailboxEmail || YEED_DEFAULTS.mailboxEmail;
 
@@ -1640,7 +1680,7 @@ async function sendGraphMail(token, toEmail, toName, subject, bodyText) {
     const body = {
       message: {
         subject,
-        body: { contentType: 'Text', content: bodyText },
+        body: { contentType: bodyHtml ? 'HTML' : 'Text', content: bodyHtml || bodyText },
         toRecipients: [{ emailAddress: { address: toEmail, name: toName } }],
       },
       saveToSentItems: true,
@@ -1675,7 +1715,9 @@ async function sendOneEmailViaGraph(consultId, affId) {
   const sig = c.signataire || localStorage.getItem('signataire') || 'Service affrètement YEED';
   const dateLimite = c.date_limite_reponse ? `avant le ${formatDate(c.date_limite_reponse)}` : '';
   const subject = `Demande de cotation affrètement routier — ${c.reference} — ${c.enl_ville} → ${c.liv_ville}`;
-  const body = buildEmailBody(c, sig, dateLimite).replace('[NOM_CONTACT]', aff.contact || aff.nom);
+  const contactName = aff.contact || aff.nom;
+  const body = buildEmailBody(c, sig, dateLimite).replace('[NOM_CONTACT]', contactName);
+  const bodyHtml = buildEmailHtml(c, sig, dateLimite).replace('[NOM_CONTACT]', contactName);
 
   try {
     const token = await getMailToken();
@@ -1684,7 +1726,7 @@ async function sendOneEmailViaGraph(consultId, affId) {
       if (statusEl) statusEl.textContent = '❌ Token manquant';
       return;
     }
-    await sendGraphMail(token, aff.email, aff.contact || aff.nom, subject, body);
+    await sendGraphMail(token, aff.email, contactName, subject, body, bodyHtml);
     if (!c.emails_envoyés) c.emails_envoyés = {};
     c.emails_envoyés[affId] = new Date().toISOString();
     save();
@@ -1726,10 +1768,11 @@ async function sendAllEmailsViaGraph() {
     const aff = getAff(affId);
     if (!aff) continue;
     const body = buildEmailBody(c, sig, dateLimite).replace('[NOM_CONTACT]', aff.contact);
+    const bodyHtml = buildEmailHtml(c, sig, dateLimite).replace('[NOM_CONTACT]', aff.contact);
     const statusEl2 = document.getElementById('email-status-' + affId);
     if (statusEl2) statusEl2.textContent = '⏳';
     try {
-      await sendGraphMail(token, aff.email, aff.contact || aff.nom, subject, body);
+      await sendGraphMail(token, aff.email, aff.contact || aff.nom, subject, body, bodyHtml);
       if (!c.emails_envoyés) c.emails_envoyés = {};
       c.emails_envoyés[affId] = new Date().toISOString();
       save();
@@ -3032,7 +3075,53 @@ function parseEmailBody(html) {
     disponibilite = 'partiel';
   }
 
-  return { prix, delai, disponibilite, raw: text.trim().slice(0, 250) };
+  // Extraction dates chargement et livraison
+  let date_chargement = null, date_livraison = null;
+
+  function parseFrDateFromText(str) {
+    // dd/mm/yyyy or dd-mm-yyyy
+    const m = str.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+    if (m) {
+      const y = m[3].length === 2 ? '20' + m[3] : m[3];
+      return `${y}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+    }
+    // dd mois yyyy (en français)
+    const mois = {janvier:'01',février:'02',fevrier:'02',mars:'03',avril:'04',mai:'05',juin:'06',
+      juillet:'07',août:'08',aout:'08',septembre:'09',octobre:'10',novembre:'11',décembre:'12',decembre:'12'};
+    const mFr = str.match(/(\d{1,2})\s+(janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre)\s+(\d{4})/i);
+    if (mFr && mois[mFr[2].toLowerCase()]) {
+      return `${mFr[3]}-${mois[mFr[2].toLowerCase()]}-${mFr[1].padStart(2,'0')}`;
+    }
+    return null;
+  }
+
+  const chargPatterns = [
+    /(?:charg(?:ement)?|enlèvement|enlev(?:ement)?|prise en charge|ramassage|départ)[^\n]{0,50}?(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i,
+    /(?:charg(?:ement)?|enlèvement)[^\n]{0,50}?(\d{1,2}\s+\w+\s+\d{4})/i,
+    /le\s+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\s+(?:pour|au départ|matin|après)/i,
+  ];
+  for (const p of chargPatterns) {
+    const m = text.match(p);
+    if (m) { date_chargement = parseFrDateFromText(m[1]); if (date_chargement) break; }
+  }
+
+  const livrPatterns = [
+    /(?:livraison|livr(?:er|é|aison)|délivrance|destination)[^\n]{0,50}?(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i,
+    /(?:livraison|livr(?:er|é))[^\n]{0,50}?(\d{1,2}\s+\w+\s+\d{4})/i,
+  ];
+  for (const p of livrPatterns) {
+    const m = text.match(p);
+    if (m) { date_livraison = parseFrDateFromText(m[1]); if (date_livraison) break; }
+  }
+
+  // Si 2 dates génériques trouvées et aucune spécifique, première = chargement, deuxième = livraison
+  if (!date_chargement && !date_livraison) {
+    const allDates = [...text.matchAll(/\b(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\b/g)].map(m => parseFrDateFromText(m[1])).filter(Boolean);
+    if (allDates.length >= 2) { date_chargement = allDates[0]; date_livraison = allDates[1]; }
+    else if (allDates.length === 1) { date_chargement = allDates[0]; }
+  }
+
+  return { prix, delai, disponibilite, date_chargement, date_livraison, raw: text.trim().slice(0, 250) };
 }
 
 function renderSyncResultsModal() {
@@ -3065,7 +3154,7 @@ function renderSyncResultsModal() {
           </label></div>
         </div>
       </div>
-      <div class="pec-fields">
+      <div class="pec-fields" style="grid-template-columns:repeat(auto-fill,minmax(160px,1fr));">
         <div class="form-group">
           <label>Prix HT (€)</label>
           <input type="number" step="0.01" placeholder="Non détecté" value="${r.parsed.prix !== null ? r.parsed.prix : ''}" oninput="pendingSyncResults[${idx}].parsed.prix=this.value?parseFloat(this.value):null">
@@ -3081,6 +3170,14 @@ function renderSyncResultsModal() {
             <option value="partiel" ${r.parsed.disponibilite==='partiel'?'selected':''}>Sous réserve</option>
             <option value="non" ${r.parsed.disponibilite==='non'?'selected':''}>Non disponible</option>
           </select>
+        </div>
+        <div class="form-group">
+          <label>📅 Date chargement ${r.parsed.date_chargement ? '✅' : '⚠️ À saisir'}</label>
+          <input type="date" value="${r.parsed.date_chargement || ''}" oninput="pendingSyncResults[${idx}].parsed.date_chargement=this.value||null" style="${!r.parsed.date_chargement ? 'border-color:var(--warning);' : ''}">
+        </div>
+        <div class="form-group">
+          <label>📅 Date livraison ${r.parsed.date_livraison ? '✅' : '⚠️ À saisir'}</label>
+          <input type="date" value="${r.parsed.date_livraison || ''}" oninput="pendingSyncResults[${idx}].parsed.date_livraison=this.value||null" style="${!r.parsed.date_livraison ? 'border-color:var(--warning);' : ''}">
         </div>
       </div>
       ${r.parsed.raw ? `<div style="margin-top:8px;font-size:11px;color:var(--text-muted);background:#f8fafc;border-radius:6px;padding:8px;max-height:55px;overflow:hidden;font-family:'Courier New',monospace;">${escapeHtml(r.parsed.raw)}…</div>` : ''}
@@ -3138,6 +3235,8 @@ function applySyncResults() {
       prix_ht: r.parsed.prix,
       delai_jours: r.parsed.delai,
       disponibilite: r.parsed.disponibilite,
+      date_chargement: r.parsed.date_chargement || null,
+      date_livraison_transport: r.parsed.date_livraison || null,
       date_reponse: today,
       obs_reponse: `Importé depuis Outlook (reçu le ${formatDateTime(r.receivedAt)})`,
       date_saisie: new Date().toISOString(),
@@ -3149,6 +3248,12 @@ function applySyncResults() {
     const existing = c.reponses.findIndex(x => x.affréteur_id === aff.id);
     if (existing >= 0) c.reponses[existing] = reponse;
     else c.reponses.push(reponse);
+
+    // Si dates de transport disponibles → passer en "validée" et pré-remplir le transport
+    if (r.parsed.date_chargement || r.parsed.date_livraison) {
+      if (!c.date_chargement_transport) c.date_chargement_transport = r.parsed.date_chargement;
+      if (!c.date_livraison_transport) c.date_livraison_transport = r.parsed.date_livraison;
+    }
 
     if (c.statut === 'envoyée') c.statut = 'réponses_en_cours';
     const minRep = c.min_reponses || 3;
