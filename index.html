@@ -2396,22 +2396,21 @@ async function pullFromSharepoint(manual = false) {
     return;
   }
 
-  // MODE COLLABORATIF avec gestion des suppressions
-  const deletedIds = getDeletedIds(); // IDs supprimés localement → ne jamais les réimporter
+  // SharePoint = source de vérité. On filtre uniquement les IDs supprimés localement.
+  const deletedIds = getDeletedIds();
   let changed = false;
 
-  if (remote.consultations) {
-    const localIds = new Set(consultations.map(c => c.id));
-    // Ajouter depuis SharePoint uniquement les non-supprimés et non-présents localement
-    const remoteOnly = remote.consultations.filter(c => !localIds.has(c.id) && !deletedIds.has(c.id));
-    if (remoteOnly.length > 0) { consultations = [...consultations, ...remoteOnly]; changed = true; }
+  if (remote.consultations !== undefined) {
+    const filtered = (remote.consultations || []).filter(c => !deletedIds.has(c.id));
+    if (JSON.stringify(filtered) !== JSON.stringify(consultations)) {
+      consultations = filtered; changed = true;
+    }
   }
   if (remote.affréteurs && remote.affréteurs.length > 0) {
-    // Filtrer les affréteurs supprimés localement
     const filtered = remote.affréteurs.filter(a => !deletedIds.has(a.id));
-    const localAffIds = new Set(affréteurs.map(a => a.id));
-    const newAffs = filtered.filter(a => !localAffIds.has(a.id));
-    if (newAffs.length > 0) { affréteurs = [...affréteurs, ...newAffs]; changed = true; }
+    if (JSON.stringify(filtered) !== JSON.stringify(affréteurs)) {
+      affréteurs = filtered; changed = true;
+    }
   }
   if (changed) {
     DB.set('affréteurs', affréteurs);
@@ -3028,11 +3027,15 @@ function startAutoSync() {
   if (!cfg.syncInterval || cfg.syncInterval <= 0) return;
   stopAutoSync();
   const intervalMs = Math.max(30000, cfg.syncInterval * 60 * 1000);
-  syncTimer = setInterval(() => {
+  syncTimer = setInterval(async () => {
     if (!msalAccount) return;
-    // Auto-sync : PUSH uniquement (sauvegarde vers SharePoint)
-    // Le pull ne se fait que manuellement ou au chargement pour éviter les conflits de suppression
-    saveToSharepoint();
+    // 1. Push les données locales vers SharePoint
+    await saveToSharepoint();
+    // 2. Pull depuis SharePoint pour voir les changements des collègues
+    // (les suppressions locales sont protégées par deleted_ids)
+    if (Date.now() - _lastDeleteTime > 5000) { // attendre 5s après une suppression
+      pullFromSharepoint();
+    }
   }, intervalMs);
   console.log(`Auto-push every ${intervalMs/1000}s.`);
 }
