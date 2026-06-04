@@ -2831,14 +2831,15 @@ async function syncOutlookReplies(consultId = null) {
     return;
   }
 
-  // Fetch last 7 days of emails — essayer plusieurs endpoints pour boîtes partagées
-  const since = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+  // Fetch last 30 days, triés par date décroissante (les plus récents en premier)
+  const since = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
   const fields = 'id,subject,from,receivedDateTime,body,isRead';
   const mailbox = encodeURIComponent(cfg.mailboxEmail);
+  const orderby = encodeURIComponent('receivedDateTime desc');
   const endpoints = [
-    `https://graph.microsoft.com/v1.0/users/${mailbox}/messages?$filter=receivedDateTime ge ${since}&$select=${fields}&$top=50`,
-    `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/Inbox/messages?$filter=receivedDateTime ge ${since}&$select=${fields}&$top=50`,
-    `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/inbox/messages?$select=${fields}&$top=50`,
+    `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/Inbox/messages?$filter=receivedDateTime ge ${since}&$select=${fields}&$top=200&$orderby=${orderby}`,
+    `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/inbox/messages?$select=${fields}&$top=200&$orderby=${orderby}`,
+    `https://graph.microsoft.com/v1.0/users/${mailbox}/messages?$filter=receivedDateTime ge ${since}&$select=${fields}&$top=200`,
   ];
 
   let messages = [];
