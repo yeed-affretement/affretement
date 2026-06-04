@@ -3914,150 +3914,6 @@ async function importARCPdf(input) {
   input.value = '';
 }
 
-// --- Scanner ARCs depuis la boîte mail ---
-async function scanARCsFromEmail() {
-  const statusEl = document.getElementById('plan-import-status');
-  const btn = document.getElementById('btn-scan-arcs');
-  const cfg = getMsalConfig();
-
-  if (!msalApp || !msalAccount) {
-    alert('Connectez-vous d\'abord à Microsoft 365 dans ⚙️ Paramètres.');
-    return;
-  }
-  if (!cfg.mailboxEmail) {
-    alert('Configurez l\'adresse de boîte mail dans ⚙️ Paramètres.');
-    return;
-  }
-
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Scan en cours…'; }
-  if (statusEl) statusEl.innerHTML = '<span style="color:var(--primary);">⏳ Lecture de la boîte mail…</span>';
-
-  // Get token
-  const scopes = ['Mail.Read', 'Mail.Read.Shared', 'User.Read'];
-  let token;
-  try {
-    const r = await msalApp.acquireTokenSilent({ scopes, account: msalAccount });
-    token = r.accessToken;
-  } catch(e) {
-    try { await msalApp.acquireTokenRedirect({ scopes, account: msalAccount, redirectUri: window.location.origin + window.location.pathname }); } catch(e2){}
-    if (btn) { btn.disabled = false; btn.textContent = '📬 Scanner les ARCs (email automatique)'; }
-    return;
-  }
-
-  // Fetch recent emails with "confirmation de commande" subject in the last 30 days
-  const since = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
-  const filter = encodeURIComponent(`receivedDateTime ge ${since} and (contains(subject,'confirmation') or contains(subject,'commande') or contains(subject,'ARC') or contains(subject,'Confirmation'))`);
-  const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(cfg.mailboxEmail)}/messages?$filter=${filter}&$select=id,subject,from,receivedDateTime,hasAttachments&$top=50`;
-
-  let messages = [];
-  try {
-    const resp = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
-    if (!resp.ok) {
-      const err = await resp.text();
-      if (statusEl) statusEl.innerHTML = `<span style="color:var(--danger);">❌ Erreur lecture boîte : HTTP ${resp.status}</span>`;
-      if (btn) { btn.disabled = false; btn.textContent = '📬 Scanner les ARCs (email automatique)'; }
-      return;
-    }
-    const data = await resp.json();
-    messages = (data.value || []).filter(m => m.hasAttachments);
-  } catch(e) {
-    if (statusEl) statusEl.innerHTML = `<span style="color:var(--danger);">❌ Erreur réseau : ${e.message}</span>`;
-    if (btn) { btn.disabled = false; btn.textContent = '📬 Scanner les ARCs (email automatique)'; }
-    return;
-  }
-
-  if (!messages.length) {
-    if (statusEl) statusEl.innerHTML = '<span style="color:var(--text-muted);">✅ Aucun ARC trouvé ces 30 derniers jours.</span>';
-    if (btn) { btn.disabled = false; btn.textContent = '📬 Scanner les ARCs (email automatique)'; }
-    return;
-  }
-
-  // Get already-imported email IDs
-  const alreadyImported = new Set(getPlanCommandes().map(c => c.email_msg_id).filter(Boolean));
-
-  if (statusEl) statusEl.innerHTML = `<span style="color:var(--primary);">⏳ ${messages.length} email(s) trouvé(s), lecture des pièces jointes…</span>`;
-
-  // Init PDF.js if needed
-  if (typeof pdfjsLib !== 'undefined') {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  }
-
-  let imported = 0, skipped = 0, errors = 0;
-
-  for (const msg of messages) {
-    if (alreadyImported.has(msg.id)) { skipped++; continue; }
-
-    // Fetch attachments list
-    try {
-      const attResp = await fetch(
-        `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(cfg.mailboxEmail)}/messages/${msg.id}/attachments?$select=id,name,contentType,size`,
-        { headers: { Authorization: 'Bearer ' + token } }
-      );
-      if (!attResp.ok) continue;
-      const attData = await attResp.json();
-      const pdfAtts = (attData.value || []).filter(a => a.contentType === 'application/pdf' || (a.name||'').toLowerCase().endsWith('.pdf'));
-      if (!pdfAtts.length) continue;
-
-      for (const att of pdfAtts) {
-        // Download full attachment (with contentBytes)
-        const fullAtt = await fetch(
-          `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(cfg.mailboxEmail)}/messages/${msg.id}/attachments/${att.id}`,
-          { headers: { Authorization: 'Bearer ' + token } }
-        );
-        if (!fullAtt.ok) continue;
-        const attJson = await fullAtt.json();
-        const base64 = attJson.contentBytes;
-        if (!base64) continue;
-
-        // Convert base64 to ArrayBuffer
-        const binary = atob(base64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-
-        // Extract text with PDF.js
-        let text = '';
-        try {
-          if (typeof pdfjsLib !== 'undefined') {
-            const pdf = await pdfjsLib.getDocument({ data: bytes.buffer }).promise;
-            for (let p = 1; p <= pdf.numPages; p++) {
-              const page = await pdf.getPage(p);
-              const content = await page.getTextContent();
-              const allStrs = content.items.map(i => i.str);
-              text += allStrs.join(' ') + '\n';
-            }
-          }
-        } catch(pdfErr) {
-          console.warn('[ARC] PDF.js error:', pdfErr);
-        }
-
-        const commande = parseARCText(text || '', att.name || msg.subject || '');
-        if (commande) {
-          commande.email_msg_id = msg.id;
-          commande.email_subject = msg.subject;
-          commande.email_from = msg.from?.emailAddress?.address || '';
-          commande.email_date = msg.receivedDateTime;
-          const list = getPlanCommandes();
-          list.push(commande);
-          savePlanCommandes(list);
-          imported++;
-        } else {
-          errors++;
-          console.warn('[ARC] Could not parse:', att.name, '— raw text length:', text.length);
-        }
-      }
-    } catch(e) {
-      console.warn('[ARC] Error processing message:', e);
-      errors++;
-    }
-  }
-
-  renderPlanCommandes();
-  const msg2 = `✅ ${imported} ARC(s) importé(s)${skipped ? `, ${skipped} déjà importé(s)` : ''}${errors ? `, ${errors} non reconnu(s)` : ''}.`;
-  if (statusEl) statusEl.innerHTML = `<span style="color:var(--success);">${msg2}</span>`;
-  if (imported) showToast(msg2);
-  if (btn) { btn.disabled = false; btn.textContent = '📬 Scanner les ARCs (email automatique)'; }
-}
-
 function importARCFromPaste() {
   const text = document.getElementById('arc-paste-area')?.value || '';
   if (!text.trim()) { alert('Collez d\'abord le texte du PDF.'); return; }
@@ -4069,241 +3925,196 @@ function importARCFromPaste() {
     renderPlanCommandes();
     closeModal('modal-coller-arc');
     document.getElementById('arc-paste-area').value = '';
-    showToast('✅ Commande importée depuis texte ARC');
+    showToast('✅ Commande importée');
   } else {
-    // Show debug info
-    let t = text.replace(/\n/g,' ').replace(/\s+/g,' ');
-    for(let i=0;i<8;i++) t=t.replace(/(\d) (\d)/g,'$1$2');
-    const refs = [...t.matchAll(/\b([12]1\d{4})\b/g)].map(m=>m[1]);
-    const dates = [...t.matchAll(/\d{2}\/\d{2}\/\d{4}/g)].map(m=>m[0]);
-    const cps = [...t.matchAll(/\b(\d{5})\b/g)].map(m=>m[1]).filter((v,i,a)=>a.indexOf(v)===i);
-    const preview = document.getElementById('arc-paste-preview');
-    if (preview) preview.innerHTML = `<span style="color:var(--danger);">⚠️ Format non reconnu.</span><br>
-      Refs détectées : <b>${refs.join(', ')||'aucune'}</b><br>
-      Dates : <b>${dates.join(', ')||'aucune'}</b><br>
-      Codes postaux : <b>${cps.join(', ')||'aucun'}</b><br>
-      <small>Si les refs et dates sont correctes, le parser peut être ajusté. Contactez le support.</small>`;
+    alert('Format non reconnu. Vérifiez que le texte contient une référence CONS- ou des références produit YEED.');
   }
 }
 
+// ============================================================
+//  SCANNER ARCS DEPUIS EMAIL
+// ============================================================
+async function scanARCsFromEmail() {
+  const statusEl = document.getElementById('plan-import-status');
+  const btn = document.getElementById('btn-scan-arcs');
+  const cfg = getMsalConfig();
+  if (!msalApp || !msalAccount) { alert('Connectez-vous d\'abord à Microsoft 365.'); return; }
+  if (!cfg.mailboxEmail) { alert('Configurez l\'adresse de boîte mail dans ⚙️ Paramètres.'); return; }
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Scan en cours…'; }
+  if (statusEl) statusEl.innerHTML = '<span style="color:var(--primary);">⏳ Lecture de la boîte mail…</span>';
+
+  const scopes = ['Mail.Read', 'Mail.Read.Shared', 'User.Read'];
+  let token;
+  try {
+    const r = await msalApp.acquireTokenSilent({ scopes, account: msalAccount });
+    token = r.accessToken;
+  } catch(e) {
+    try { const r2 = await msalApp.acquireTokenPopup({ scopes, account: msalAccount }); token = r2.accessToken; } catch(e2) {}
+    if (!token) { if (btn) { btn.disabled = false; btn.textContent = '📬 Scanner les ARCs (email automatique)'; } return; }
+  }
+
+  const since = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+  const filter = encodeURIComponent(`receivedDateTime ge ${since} and (contains(subject,'confirmation') or contains(subject,'commande') or contains(subject,'ARC') or contains(subject,'Confirmation'))`);
+  const mailbox = encodeURIComponent(cfg.mailboxEmail);
+  const order = encodeURIComponent('receivedDateTime desc');
+  const url = `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/Inbox/messages?$filter=${filter}&$select=id,subject,from,receivedDateTime,hasAttachments&$top=50&$orderby=${order}`;
+
+  let messages = [];
+  try {
+    const resp = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+    if (!resp.ok) { const t2 = await resp.text(); if (statusEl) statusEl.innerHTML = `<span style="color:var(--danger);">❌ Erreur HTTP ${resp.status}</span>`; if (btn) { btn.disabled=false; btn.textContent='📬 Scanner les ARCs (email automatique)'; } return; }
+    const data = await resp.json();
+    messages = (data.value || []).filter(m => m.hasAttachments);
+  } catch(e) {
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--danger);">❌ ${e.message}</span>`;
+    if (btn) { btn.disabled=false; btn.textContent='📬 Scanner les ARCs (email automatique)'; } return;
+  }
+
+  if (!messages.length) { if (statusEl) statusEl.innerHTML='<span style="color:var(--text-muted);">✅ Aucun ARC trouvé ces 30 derniers jours.</span>'; if (btn) { btn.disabled=false; btn.textContent='📬 Scanner les ARCs (email automatique)'; } return; }
+
+  const alreadyImported = new Set(getPlanCommandes().map(c => c.email_msg_id).filter(Boolean));
+  if (typeof pdfjsLib !== 'undefined') pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+  if (statusEl) statusEl.innerHTML = `<span style="color:var(--primary);">⏳ ${messages.length} email(s), lecture des PJ…</span>`;
+
+  let imported = 0, errors = 0;
+  for (const msg of messages) {
+    if (alreadyImported.has(msg.id)) continue;
+    try {
+      const attResp = await fetch(`https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}/attachments?$select=id,name,contentType,size`, { headers: { Authorization: 'Bearer ' + token } });
+      if (!attResp.ok) continue;
+      const attData = await attResp.json();
+      const pdfAtts = (attData.value || []).filter(a => a.contentType === 'application/pdf' || (a.name||'').toLowerCase().endsWith('.pdf'));
+      if (!pdfAtts.length) continue;
+      for (const att of pdfAtts) {
+        const fullAtt = await fetch(`https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${msg.id}/attachments/${att.id}`, { headers: { Authorization: 'Bearer ' + token } });
+        if (!fullAtt.ok) continue;
+        const attJson = await fullAtt.json();
+        const base64 = attJson.contentBytes;
+        if (!base64) continue;
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        let text = '';
+        try {
+          if (typeof pdfjsLib !== 'undefined') {
+            const pdf = await pdfjsLib.getDocument({ data: bytes.buffer }).promise;
+            for (let p = 1; p <= pdf.numPages; p++) {
+              const page = await pdf.getPage(p);
+              const content = await page.getTextContent();
+              text += content.items.map(i => i.str).join(' ') + '\n';
+            }
+          }
+        } catch(pdfErr) { console.warn('[ARC] PDF.js error:', pdfErr); }
+        const commande = parseARCText(text || '', att.name || msg.subject || '');
+        if (commande) {
+          commande.email_msg_id = msg.id;
+          commande.email_subject = msg.subject;
+          const list = getPlanCommandes();
+          list.push(commande);
+          savePlanCommandes(list);
+          imported++;
+        } else { errors++; }
+      }
+    } catch(e) { console.warn('[ARC] Error:', e); errors++; }
+  }
+
+  renderPlanCommandes();
+  const msg2 = `✅ ${imported} ARC(s) importé(s)${errors ? `, ${errors} non reconnu(s)` : ''}.`;
+  if (statusEl) statusEl.innerHTML = `<span style="color:var(--success);">${msg2}</span>`;
+  if (imported) showToast(msg2);
+  if (btn) { btn.disabled=false; btn.textContent='📬 Scanner les ARCs (email automatique)'; }
+}
+
+// ============================================================
+//  PARSER ARC DIVALTO (PDF.js extrait chaque caractère séparé par espace)
+// ============================================================
 function parseARCText(text, filename) {
-  // DIVALTO PDFs have spaces between EVERY character (letters AND digits)
-  let t = text.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
-  // Compact digit sequences: "2 6 9 2 4" → "26924"
+  const raw = text.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+
+  // === ÉTAPE 1 : compaction des chiffres uniquement ===
+  let t = raw;
   for (let i = 0; i < 12; i++) { t = t.replace(/(\d) (\d)/g, '$1$2'); }
-  // Compact letter sequences: "D I S T R I B O I S" → "DISTRIBOIS"
-  for (let i = 0; i < 12; i++) { t = t.replace(/([A-ZÀ-ÿa-z]) ([A-ZÀ-ÿa-z])/g, '$1$2'); }
-  // Fix dates: "19 / 05 / 2026" → "19/05/2026"
+  // Normaliser les dates (19 / 05 / 2026 → 19/05/2026)
   t = t.replace(/(\d{1,2})\s*\/\s*(\d{1,2})\s*\/\s*(\d{4})/g, '$1/$2/$3');
-  // Fix comma-decimals: "2880 , 000" → "2880,000"
+  // Normaliser les virgules décimales
   t = t.replace(/(\d)\s*,\s*(\d)/g, '$1,$2');
 
+  // === ÉTAPE 2 : extraire numéro de commande ===
+  const numMatch = t.match(/(\d{5,6})\s*59850/) || { 1: filename.replace(/[^\d]/g,'').slice(0,6) };
+  const num_commande = numMatch[1] || '';
 
-  // Order number: 5-6 digit number appearing before YEED postal code 59850
-  const numMatch = t.match(/(\d{5,6})\s*59850/)
-    || t.match(/commande\s*[–\-]?\s*n[°o]?\s*[–\-]?\s*(\d{4,6})/i)
-    || { 1: filename.replace(/[^\d]/g,'').slice(0,6) };
-  const num_commande = numMatch[1] || filename.replace(/[^\d]/g,'').slice(0,6);
-
-  // Find delivery postal code + city — exclude YEED's own 59850
+  // === ÉTAPE 3 : extraire CP + ville depuis le texte RAW (avant compaction lettres) ===
+  // Dans le PDF DIVALTO : "19200 U S S E L F R F R A N C E" ou "97232 L E L A M E N T I N F R"
+  // Stratégie : après digit compaction, le CP est un bloc de 5 chiffres
+  // La ville est la séquence de majuscules AVANT "F R" ou "FRANCE" ou "www"
   let cp_liv = '', ville_liv = '', client = '';
-  // CP + city — now letters are compacted so "LE LAMENTIN" → "LELAMENTIN" or "Le Lamentin"
-  const cpMatches = [...t.matchAll(/\b(\d{5})\b\s*([A-ZÁÉÈÊÀÎÙÛÇ][A-Za-zÀ-ÿ\-]{1,25})/g)];
-  for (const m of cpMatches) {
-    const cp = m[1];
-    if (['59850','59000','75000','33374'].includes(cp)) continue;
-    if (parseInt(cp) < 1000) continue;
-    // Skip SIRET context
-    const before = t.slice(Math.max(0, m.index - 8), m.index);
-    if (/\d{7,}$/.test(before)) continue;
-    cp_liv = cp;
-    ville_liv = m[2].trim();
-    break;
+
+  // Regex : 5 chiffres + espace + séquence de majuscules séparées + F R / FRANCE
+  const cpCity = t.match(/\b(\d{5})\b ([A-Z](?:(?: [A-Z])+)?) (?:F R|FR) (?:F R A N C E|FRANCE)/);
+  if (cpCity && !['59850','59000'].includes(cpCity[1])) {
+    cp_liv = cpCity[1];
+    ville_liv = cpCity[2].replace(/ /g, ''); // "U S S E L" → "USSEL"
   }
+  // Fallback : juste après le 2e code postal non-YEED
   if (!cp_liv) {
-    const allCPs = [...t.matchAll(/\b(\d{5})\b/g)];
-    const dest = allCPs.find(m => !['59850','59000','75000','33374'].includes(m[1]) && parseInt(m[1]) > 1000);
-    if (dest) cp_liv = dest[1];
+    const allCP = [...t.matchAll(/\b(\d{5})\b/g)].filter(m => !['59850','59000','33374'].includes(m[1]) && parseInt(m[1]) > 1000);
+    if (allCP.length) { cp_liv = allCP[0][1]; }
   }
 
-  // Client name — now that letters are compacted, extract from "Livréà" or order number context
-  // DIVALTO: order number, then YEED info, then CLIENT NAME, then client address, then YEED address
-  // Pattern: after the order number block, find company name before postal code
-  const livreMatch = t.match(/Livréà\s*([A-ZÁÉÈÊÀÎÙÛÇ][A-Za-zÀ-ÿ\s\.\-'&]{2,40}?)\s+\d{5}/);
-  if (livreMatch) { client = livreMatch[1].trim().split(/\s{2,}/)[0]; }
-  if (!client) {
-    // Fallback: company name appears after NIEPPE or order@yeedgroup.com
-    const afterYeed = t.match(/(?:NIEPPE|yeedgroup\.com)\s+([A-ZÁÉÈÊÀÎÙÛÇ][A-Za-zÀ-ÿ\-\.]{2,30})/);
-    if (afterYeed) client = afterYeed[1].trim();
+  
+  // === ÉTAPE 4 : extraire le client ===
+  const afterYeed = t.match(/(?:yeedgroup[^\s]*|NIEPPE)\s+([A-Z][A-Z\s-]{2,40}?)\s+\d{5}/i);
+  if (afterYeed) {
+    client = afterYeed[1].trim();
+    for (let i=0;i<5;i++) client=client.replace(/([A-Z]) ([A-Z])/g,'$1$2');
   }
 
-  // All dates (with positions)
+  // === ÉTAPE 5 : dates ===
   const allDates = [...t.matchAll(/(\d{2}\/\d{2}\/\d{4})/g)];
-  const date_cmd = allDates[0] ? parseFrDate(allDates[0][1]) : new Date().toISOString().slice(0,10);
+  const date_cmd = allDates[0] ? parseFrDateARC(allDates[0][1]) : new Date().toISOString().slice(0,10);
 
-  // Extract line items — scan for product refs (110xxx or 21xxxx) and pair with nearby date+qty
+  // === ÉTAPE 6 : lignes produits ===
+  // PDF.js DIVALTO : DESCRIPTION -> DATE -> QTY -> PRICE -> TOTAL -> REF
   const lignes = [];
   const allRefs = [...t.matchAll(/\b([12]1\d{4})\b/g)];
-
+  const allQtys = [...t.matchAll(/\b(\d{1,6}),(\d{3})\b/g)];
   for (const refMatch of allRefs) {
     const ref = parseInt(refMatch[1]);
     const refPos = refMatch.index;
-    if (ref < 110000 || ref > 219999) continue;
-
-    // Search in a 400-char window centered on the ref (both before AND after)
-    const winStart = Math.max(0, refPos - 300);
-    const winEnd = Math.min(t.length, refPos + 150);
-    const window = t.slice(winStart, winEnd);
-
-    // Skip ecotaxe lines
+    if (ref<110000||ref>219999) continue;
+    const winStart = Math.max(0,refPos-350);
+    const window = t.slice(winStart,refPos+50);
     if (window.toLowerCase().includes('ecotaxe')) continue;
-
-    // Find delivery date in the window (prefer closest)
     const datesInWin = [...window.matchAll(/(\d{2}\/\d{2}\/\d{4})/g)];
     if (!datesInWin.length) continue;
-    // Use the first date in the window (delivery date for this line)
-    const dateLiv = parseFrDate(datesInWin[0][1]);
-
-    // Find quantity: number like "2880,000" or "100,000" (qty with 3 decimal places)
-    // Exclude prices (typically 1-4 digits before comma) — qty is usually larger
-    const qtysInWin = [...window.matchAll(/\b(\d{1,5}),(\d{3})\b/g)]
-      .filter(m => {
-        const val = parseInt(m[1]);
-        return val > 1; // qty > 1 (filter out ecotaxe 0,010 etc.)
-      });
+    const dateLiv = parseFrDateARC(datesInWin[0][1]);
+    const qtysInWin = allQtys.filter(q=>q.index>=winStart&&q.index<refPos);
     if (!qtysInWin.length) continue;
-    // Take the LARGEST qty in window (most likely the actual order quantity)
-    const bestQty = qtysInWin.reduce((best, cur) => {
-      return parseInt(cur[1]) > parseInt(best[1]) ? cur : best;
-    });
-    const qty = Math.round(parseFloat(bestQty[1] + '.' + bestQty[2]));
-    if (!qty || isNaN(qty) || qty <= 0) continue;
-
+    const bestQty = qtysInWin.reduce((a,b)=>parseInt(a[1])>=parseInt(b[1])?a:b);
+    const qty = Math.round(parseFloat(bestQty[1]+'.'+bestQty[2]));
+    if (!qty||qty<=0) continue;
     const prod = YEED_PRODUCTS[ref];
-    const calc = calculerLignePalettes(ref, qty);
-    lignes.push({ ref: String(ref), desc: prod?.desc || `Réf ${ref}`, qty, date_liv: dateLiv, ...calc });
+    const calc = calculerLignePalettes(ref,qty);
+    lignes.push({ref:String(ref),desc:prod?.desc||`Ref ${ref}`,qty,date_liv:dateLiv,...calc});
   }
-
   const date_liv = lignes.length
-    ? lignes.reduce((min,l) => (l.date_liv && l.date_liv < min) ? l.date_liv : min, lignes[0].date_liv || date_cmd)
+    ? lignes.reduce((min,l)=>(l.date_liv&&l.date_liv<min)?l.date_liv:min,lignes[0].date_liv||date_cmd)
     : date_cmd;
-
-  // Fallback: if no cp found but lignes found, mark as unknown
-  if (!cp_liv && !lignes.length) return null;
-
-  return {
-    id: uid(), source: 'pdf', num_commande, date_cmd,
-    date_import: new Date().toISOString(),
-    client: client || 'Client inconnu',
-    adresse_liv: '', cp_liv, ville_liv, date_liv, lignes,
-    statut: 'en_attente',
-  };
+  if (!cp_liv&&!lignes.length) return null;
+  return {id:uid(),source:'pdf',num_commande,date_cmd,
+    date_import:new Date().toISOString(),
+    client:client||'Client inconnu',
+    adresse_liv:'',cp_liv,ville_liv,date_liv,lignes,statut:'en_attente'};
 }
 
-function parseFrDate(str) {
+function parseFrDateARC(str) {
   if (!str) return '';
-  const parts = str.split('/');
-  if (parts.length !== 3) return str;
-  return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  const p = str.split('/');
+  if (p.length!==3) return str;
+  return `${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`;
 }
 
-// --- Saisie manuelle ---
-function onLigneRefInput(input) {
-  const row = input.closest('.ligne-cmd');
-  const ref = parseInt(input.value.trim());
-  const prod = YEED_PRODUCTS[ref];
-  const descEl = row.querySelector('.ligne-desc');
-  if (prod) { descEl.value = prod.desc; input.style.borderColor = 'var(--success)'; }
-  else { descEl.value = ''; input.style.borderColor = ref > 99999 ? 'var(--danger)' : ''; }
-  onLigneQtyInput(row.querySelector('.ligne-qty'));
-}
-
-function onLigneQtyInput(input) {
-  const row = input.closest('.ligne-cmd');
-  const ref = parseInt(row.querySelector('.ligne-ref').value);
-  const qty = parseInt(input.value);
-  const palEl = row.querySelector('.ligne-pal');
-  if (ref && qty > 0) {
-    const calc = calculerLignePalettes(ref, qty);
-    palEl.value = calc.label;
-  } else { palEl.value = ''; }
-  updateManualTotal();
-}
-
-function updateManualTotal() {
-  const rows = document.querySelectorAll('#lignes-commande-container .ligne-cmd');
-  let total = 0;
-  rows.forEach(row => {
-    const ref = parseInt(row.querySelector('.ligne-ref').value);
-    const qty = parseInt(row.querySelector('.ligne-qty').value);
-    if (ref && qty > 0) total += calculerLignePalettes(ref, qty).palettes || 0;
-  });
-  const el = document.getElementById('cmd-total-pal');
-  if (el) el.textContent = total > 0 ? `Total : ${total.toFixed(2)} palettes` : '';
-}
-
-function addLigneCmd() {
-  const container = document.getElementById('lignes-commande-container');
-  const div = document.createElement('div');
-  div.className = 'ligne-cmd';
-  div.style.cssText = 'display:grid;grid-template-columns:120px 1fr 100px 100px 32px;gap:6px;margin-bottom:6px;align-items:center;';
-  div.innerHTML = `
-    <input type="text" placeholder="Référence" class="ligne-ref" style="padding:6px;border:1px solid var(--border);border-radius:5px;font-size:12px;" oninput="onLigneRefInput(this)">
-    <input type="text" placeholder="Description" class="ligne-desc" style="padding:6px;border:1px solid var(--border);border-radius:5px;font-size:12px;" readonly>
-    <input type="number" placeholder="Quantité" class="ligne-qty" style="padding:6px;border:1px solid var(--border);border-radius:5px;font-size:12px;" oninput="onLigneQtyInput(this)">
-    <input type="text" placeholder="Palettes" class="ligne-pal" style="padding:6px;border:1px solid var(--border);border-radius:5px;font-size:12px;background:#f8fafc;" readonly>
-    <button type="button" onclick="this.closest('.ligne-cmd').remove();updateManualTotal();" style="padding:4px 8px;border:1px solid var(--border);border-radius:5px;background:#fff;cursor:pointer;color:var(--danger);">✕</button>`;
-  container.appendChild(div);
-}
-
-function saveCommandeManuelle(e) {
-  e.preventDefault();
-  const fd = new FormData(e.target);
-  const rows = document.querySelectorAll('#lignes-commande-container .ligne-cmd');
-  const lignes = [];
-  rows.forEach(row => {
-    const ref = row.querySelector('.ligne-ref').value.trim();
-    const qty = parseInt(row.querySelector('.ligne-qty').value);
-    if (!ref || !qty) return;
-    const prod = YEED_PRODUCTS[parseInt(ref)];
-    const calc = calculerLignePalettes(ref, qty);
-    lignes.push({ ref, desc: prod?.desc || ref, qty, ...calc });
-  });
-  if (!lignes.length) { alert('Ajoutez au moins une ligne de commande.'); return; }
-
-  const commande = {
-    id: uid(),
-    source: 'manual',
-    num_commande: fd.get('num_commande') || '',
-    date_cmd: fd.get('date_cmd') || new Date().toISOString().slice(0,10),
-    date_import: new Date().toISOString(),
-    client: fd.get('client'),
-    adresse_liv: fd.get('adresse_liv'),
-    cp_liv: fd.get('cp_liv'),
-    ville_liv: fd.get('ville_liv'),
-    date_liv: fd.get('date_liv'),
-    lignes,
-    statut: 'en_attente',
-  };
-
-  const list = getPlanCommandes();
-  list.push(commande);
-  savePlanCommandes(list);
-  renderPlanCommandes();
-  closeModal('modal-commande-manuelle');
-  e.target.reset();
-  document.getElementById('lignes-commande-container').innerHTML = `
-    <div class="ligne-cmd" style="display:grid;grid-template-columns:120px 1fr 100px 100px 32px;gap:6px;margin-bottom:6px;align-items:center;">
-      <input type="text" placeholder="Référence" class="ligne-ref" style="padding:6px;border:1px solid var(--border);border-radius:5px;font-size:12px;" oninput="onLigneRefInput(this)">
-      <input type="text" placeholder="Description" class="ligne-desc" style="padding:6px;border:1px solid var(--border);border-radius:5px;font-size:12px;" readonly>
-      <input type="number" placeholder="Quantité" class="ligne-qty" style="padding:6px;border:1px solid var(--border);border-radius:5px;font-size:12px;" oninput="onLigneQtyInput(this)">
-      <input type="text" placeholder="Palettes" class="ligne-pal" style="padding:6px;border:1px solid var(--border);border-radius:5px;font-size:12px;background:#f8fafc;" readonly>
-      <button type="button" onclick="this.closest('.ligne-cmd').remove();" style="padding:4px 8px;border:1px solid var(--border);border-radius:5px;background:#fff;cursor:pointer;color:var(--danger);">✕</button>
-    </div>`;
-  showToast('✅ Commande ajoutée au plan');
-}
-
-// Initial badge update
 updatePlanBadge();
 </script>
 </body>
