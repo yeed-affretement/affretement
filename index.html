@@ -4133,24 +4133,17 @@ function parseARCText(text, filename) {
   }
   qtysCompact.sort((a,b) => a.pos - b.pos);
   const lineQtys = qtysCompact;
-  const debugRef = `refs:${refsOrdered.map(r=>r.ref).join(',')||'aucune'} qtys:${lineQtys.length} dates:${lineDates.length}`;
+  const dbg = `refs:${refsOrdered.map(r=>r.ref).join(',')||'aucune'} qtys:${lineQtys.length} dates:${lineDates.length}`;
 
-  const debugRef = `refs:${refsOrdered.map(r=>r.ref).join(',')||'aucune'} qtys:${lineQtys.length} dates:${lineDates.length}`;
-
-  // 4. Appariement séquentiel : ref[i] ↔ lineDates[i] ↔ lineQtys[i]
-  // (les ecotaxe sont filtrées car leurs qtys sont généralement = à la ligne précédente)
-  const seenQtys = new Set(); // éviter doublons ecotaxe
+  // 4. Appariement séquentiel
   for (let i = 0; i < refsOrdered.length; i++) {
     const ref = refsOrdered[i].ref;
     const dateLiv = lineDates[i] ? parseFrDateARC(lineDates[i][1]) : date_cmd;
-    // Chercher la quantité à l'index i, en sautant les doublons (ecotaxe réutilise la même qty)
-    let qtyEntry = lineQtys[i];
-    if (!qtyEntry) qtyEntry = lineQtys[lineQtys.length - 1]; // fallback dernière qty
+    const qtyEntry = lineQtys[i] || lineQtys[lineQtys.length-1];
     if (!qtyEntry) continue;
     const qty = qtyEntry.val;
     if (!qty || qty <= 0) continue;
     const prod = YEED_PRODUCTS[ref];
-    const ca
     const calc = calculerLignePalettes(ref, qty);
     lignes.push({ ref: String(ref), desc: prod?.desc || `Ref ${ref}`, qty, date_liv: dateLiv, ...calc });
   }
