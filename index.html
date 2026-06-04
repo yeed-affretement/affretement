@@ -376,8 +376,8 @@
                   </div>
                   <div class="form-group mb-8"><label>Pays</label><input type="text" name="enl_pays" value="France"></div>
                 </div>
-                <div class="form-group"><label>Date souhaitée *</label><input type="date" name="enl_date" required></div>
                 <div class="form-group mt-8" style="margin-top:8px;"><label>Horaires dispo</label><input type="text" name="enl_horaires" placeholder="8h-17h"></div>
+                <input type="hidden" name="enl_date" value="">
               </div>
               <div class="card">
                 <div class="form-section-title">🎯 Livraison</div>
@@ -387,8 +387,8 @@
                   <div class="form-group"><label>Ville *</label><input type="text" name="liv_ville" required placeholder="Lyon"></div>
                 </div>
                 <div class="form-group mb-8"><label>Pays</label><input type="text" name="liv_pays" value="France"></div>
-                <div class="form-group"><label>Date souhaitée *</label><input type="date" name="liv_date" required></div>
                 <div class="form-group mt-8" style="margin-top:8px;"><label>Horaires dispo</label><input type="text" name="liv_horaires" placeholder="8h-17h"></div>
+                <input type="hidden" name="liv_date" value="">
               </div>
             </div>
 
@@ -1124,7 +1124,7 @@ function renderDashboard() {
       const sent = (c.affréteurs_consultés||[]).length;
       return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);">
         <div><div class="font-bold text-sm">${c.reference}</div><div class="text-xs text-muted">${c.enl_ville} → ${c.liv_ville}</div></div>
-        <div style="text-align:right"><span class="badge badge-blue">${rep}/${sent} réponses</span><div class="text-xs text-muted" style="margin-top:3px;">${formatDate(c.enl_date)}</div></div>
+        <div style="text-align:right"><span class="badge badge-blue">${rep}/${sent} réponses</span><div class="text-xs text-muted" style="margin-top:3px;">Envoyée le ${formatDate(c.date_creation)}</div></div>
       </div>`;
     }).join('');
   }
@@ -1175,13 +1175,9 @@ function renderNouvelleForm() {
   const sigTel = localStorage.getItem('signataire_tel') || '0374280704';
   if (document.getElementById('signataire-tel-field')) document.getElementById('signataire-tel-field').value = sigTel;
 
-  // Set default dates
-  const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate()+1);
-  const dayAfter = new Date(); dayAfter.setDate(dayAfter.getDate()+3);
+  // Date limite de réponse par défaut = demain
+  const lim = new Date(); lim.setDate(lim.getDate()+1);
   const fmt = d => d.toISOString().slice(0,10);
-  document.querySelector('[name=enl_date]').value = fmt(tomorrow);
-  document.querySelector('[name=liv_date]').value = fmt(dayAfter);
-  const lim = new Date(); lim.setDate(lim.getDate()+1); lim.setHours(12);
   document.querySelector('[name=date_limite_reponse]').value = fmt(lim);
 }
 
@@ -1406,9 +1402,9 @@ function renderConsultations() {
             ${hasEnough && c.statut !== 'validée' && c.statut !== 'terminée' ? `<span class="badge badge-orange urgent-indicator">⚡ Assez de réponses — Décidez !</span>` : ''}
           </div>
           <div style="display:flex;gap:20px;font-size:13px;color:var(--text-muted);flex-wrap:wrap;">
-            <span>📦 ${c.nb_palettes} pal. ${c.type_palette} — ${c.poids_kg} kg</span>
+            <span>📦 ${c.nb_palettes} pal. ${c.type_palette || ''} — ${c.poids_kg} kg</span>
             <span>📍 <strong>${c.enl_ville}</strong> → <strong>${c.liv_ville}</strong></span>
-            <span>📅 Enlèv.: ${formatDate(c.enl_date)} | Livr.: ${formatDate(c.liv_date)}</span>
+            <span>📤 Envoyée le ${formatDate(c.date_creation)}</span>
             ${options}${opts2}${opts3}${opts4}
           </div>
         </div>
