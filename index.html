@@ -1524,17 +1524,15 @@ Nous sollicitons votre meilleure cotation pour l'expédition suivante :
 ${c.valeur_euro ? `• Valeur     : ${formatPrice(c.valeur_euro)} (info assurance)\n` : ''}
 ━━━ ENLÈVEMENT ━━━
 • ${c.enl_adresse}, ${c.enl_cp} ${c.enl_ville} (${c.enl_pays})
-${c.enl_horaires ? `• Horaires : ${c.enl_horaires}` : ''}
+${c.enl_horaires ? `• Horaires : ${c.enl_horaires}\n` : ''}
 ━━━ LIVRAISON ━━━
 • ${c.liv_adresse}, ${c.liv_cp} ${c.liv_ville} (${c.liv_pays})
-${c.liv_horaires ? `• Horaires : ${c.liv_horaires}` : ''}
-${obsBlock ? `\n━━━ INFORMATIONS COMPLÉMENTAIRES ━━━\n${obsBlock}\n` : ''}
+${c.liv_horaires ? `• Horaires : ${c.liv_horaires}\n` : ''}
+${obsBlock ? `━━━ INFORMATIONS COMPLÉMENTAIRES ━━━\n${obsBlock}\n` : ''}
 Merci de nous faire parvenir votre meilleure offre ${dateLimite}.
 Précisez dans votre réponse :
 • Prix HT
-• Délai de transit
-• Disponibilité
-• Date de chargement souhaitée
+• Date de chargement possible
 • Date de livraison estimée
 
 Cordialement,
@@ -1542,36 +1540,99 @@ ${sig}${buildSigTel()}`;
 }
 
 function buildEmailHtml(c, sig, dateLimite) {
-  // Version HTML avec logo YEED pour l'envoi par email
-  const textBody = buildEmailBody(c, sig, dateLimite);
-  const htmlContent = textBody
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/━━━([^━]+)━━━/g, '<br><strong style="color:#1e40af;">$1</strong><br>')
-    .replace(/\n/g, '<br>');
+  const opts = [];
+  if (c.hayon) opts.push('Hayon requis');
+  if (c.adr) opts.push('Matières dangereuses (ADR)');
+  if (c.temp_dirigee) opts.push('Température dirigée');
+  if (c.tautliner) opts.push('Tautliner (chargement latéral)');
+  const palettes = c.lignes_palettes && c.lignes_palettes.length > 0
+    ? c.lignes_palettes.map(l => `${l.nb} palette(s)${l.dim ? ' ' + l.dim : ''}`).join(' + ')
+    : `${c.nb_palettes} palette(s) ${c.type_palette || ''}`;
 
-  const sigHtml = `
-    <br><br>
-    <table style="border-top:2px solid #1e40af;padding-top:12px;font-family:Arial,sans-serif;font-size:13px;color:#1e293b;">
-      <tr>
-        <td style="padding-right:16px;vertical-align:middle;">
-          <img src="https://www.yeedgroup.com/wp-content/uploads/2022/03/YEED-logo-couleur.png"
-               alt="YEED" style="height:40px;width:auto;"
-               onerror="this.style.display='none'">
-        </td>
-        <td style="vertical-align:middle;border-left:2px solid #e2e8f0;padding-left:14px;">
-          <strong style="font-size:14px;color:#1e40af;">${sig}</strong><br>
-          <span style="color:#64748b;">Service Affrètement — YEED GROUP</span><br>
-          <span style="color:#64748b;">📞 ${buildSigTel().replace('Tél. : ','')}</span><br>
-          <span style="color:#64748b;">✉️ affretement@yeedgroup.com</span><br>
-          <a href="https://www.yeedgroup.com" style="color:#1e40af;text-decoration:none;">www.yeedgroup.com</a>
-        </td>
-      </tr>
-    </table>`;
+  const tel = localStorage.getItem('signataire_tel') || '0374280704';
 
-  return `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#1e293b;max-width:680px;">
-    ${htmlContent}
-    ${sigHtml}
-  </div>`;
+  const section = (title, rows) => `
+    <tr><td colspan="2" style="padding:14px 0 6px;font-weight:700;font-size:12px;letter-spacing:1px;color:#1e40af;text-transform:uppercase;border-bottom:1px solid #e2e8f0;">${title}</td></tr>
+    ${rows.filter(Boolean).map(r => `<tr><td style="padding:4px 12px 4px 0;color:#64748b;font-size:13px;white-space:nowrap;vertical-align:top;">${r[0]}</td><td style="padding:4px 0;font-size:13px;color:#1e293b;">${r[1]}</td></tr>`).join('')}`;
+
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body style="margin:0;padding:0;background:#f1f5f9;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:24px 0;">
+    <tr><td align="center">
+      <table width="640" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+
+        <!-- HEADER YEED -->
+        <tr><td style="background:#1e3a8a;padding:20px 32px;">
+          <table cellpadding="0" cellspacing="0"><tr>
+            <td><img src="https://yeedgroup.com/wp-content/themes/yeedgroup/assets/img/YeedGroup-fullwhite.svg" alt="YEED Group" height="36" style="display:block;" onerror="this.outerHTML='<span style=&quot;color:#fff;font-weight:800;font-size:22px;letter-spacing:-0.5px;&quot;>YEED<span style=&quot;color:#93c5fd;&quot;> Group</span></span>'"></td>
+            <td style="padding-left:20px;border-left:1px solid rgba(255,255,255,0.2);margin-left:20px;">
+              <span style="color:rgba(255,255,255,0.9);font-size:12px;font-family:Arial,sans-serif;">Service Affrètement</span>
+            </td>
+          </tr></table>
+        </td></tr>
+
+        <!-- SUBHEADER -->
+        <tr><td style="background:#1e40af;padding:12px 32px;">
+          <span style="color:#bfdbfe;font-size:13px;font-family:Arial,sans-serif;">📦 Demande de cotation — ${c.reference} — ${c.enl_ville} → ${c.liv_ville}</span>
+        </td></tr>
+
+        <!-- BODY -->
+        <tr><td style="padding:28px 32px;font-family:Arial,sans-serif;">
+          <p style="margin:0 0 20px;font-size:15px;color:#1e293b;">Bonjour [NOM_CONTACT],</p>
+          <p style="margin:0 0 20px;font-size:14px;color:#475569;">Nous sollicitons votre meilleure cotation pour l'expédition suivante :</p>
+
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
+            ${section('Marchandise', [
+              ['Nature', c.nature],
+              ['Poids total', `${c.poids_kg} kg`],
+              ['Palettes', palettes],
+              c.valeur_euro ? ['Valeur marchande', `${formatPrice(c.valeur_euro)} (info assurance)`] : null,
+              opts.length ? ['Options', opts.join(', ')] : null,
+            ])}
+            ${section('Enlèvement', [
+              ['Adresse', `${c.enl_adresse}<br>${c.enl_cp} ${c.enl_ville} (${c.enl_pays})`],
+              c.enl_horaires ? ['Horaires', c.enl_horaires] : null,
+            ])}
+            ${section('Livraison', [
+              ['Adresse', `${c.liv_adresse}<br>${c.liv_cp} ${c.liv_ville} (${c.liv_pays})`],
+              c.liv_horaires ? ['Horaires', c.liv_horaires] : null,
+            ])}
+            ${c.observations ? section('Informations complémentaires', [['', c.observations.replace(/\n/g,'<br>')]]) : ''}
+          </table>
+
+          <!-- CTA BOX -->
+          <table width="100%" cellpadding="0" cellspacing="0" style="background:#eff6ff;border-left:4px solid #1e40af;border-radius:4px;margin-bottom:24px;">
+            <tr><td style="padding:16px 20px;">
+              <p style="margin:0 0 8px;font-weight:700;color:#1e40af;font-size:14px;">Merci de nous faire parvenir votre meilleure offre ${dateLimite ? dateLimite : ''}</p>
+              <p style="margin:0;font-size:13px;color:#475569;">Précisez dans votre réponse :<br>
+              ✅ Prix HT &nbsp;&nbsp; ✅ Date de chargement possible &nbsp;&nbsp; ✅ Date de livraison estimée</p>
+            </td></tr>
+          </table>
+        </td></tr>
+
+        <!-- SIGNATURE -->
+        <tr><td style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:20px 32px;">
+          <table cellpadding="0" cellspacing="0"><tr>
+            <td style="padding-right:16px;vertical-align:middle;">
+              <img src="https://yeedgroup.com/wp-content/uploads/2024/12/cropped-yeed-icon-400x400.png" alt="YEED" width="48" height="48" style="border-radius:8px;display:block;">
+            </td>
+            <td style="vertical-align:middle;padding-left:16px;border-left:2px solid #e2e8f0;">
+              <strong style="font-size:14px;color:#1e3a8a;display:block;">${sig}</strong>
+              <span style="font-size:12px;color:#64748b;display:block;">Service Affrètement — YEED GROUP</span>
+              <span style="font-size:12px;color:#64748b;display:block;margin-top:4px;">📞 ${tel} &nbsp;|&nbsp; ✉️ affretement@yeedgroup.com</span>
+              <a href="https://www.yeedgroup.com" style="font-size:12px;color:#1e40af;text-decoration:none;">www.yeedgroup.com</a>
+            </td>
+          </tr></table>
+        </td></tr>
+
+        <!-- FOOTER -->
+        <tr><td style="background:#1e3a8a;padding:12px 32px;text-align:center;">
+          <span style="font-size:11px;color:rgba(255,255,255,0.5);font-family:Arial,sans-serif;">YEED GROUP — 332 rue de Bruxelles, 59850 Nieppe — France</span>
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+  </body></html>`;
 }
 
 function exportData() {
