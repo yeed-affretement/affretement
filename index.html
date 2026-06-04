@@ -1024,6 +1024,7 @@ let consultations = DB.get('consultations', []);
 function save() {
   DB.set('affréteurs', affréteurs);
   DB.set('consultations', consultations);
+  DB.set('user_data_initialized', true); // empêche initDemo de réinitialiser les données
   debouncedSpSave();
 }
 
@@ -1823,6 +1824,7 @@ function openDetail(consultId) {
   document.getElementById('modal-detail-body').innerHTML = body;
   document.getElementById('modal-detail-footer').innerHTML = `
     <button class="btn btn-outline" onclick="closeModal('modal-detail')">Fermer</button>
+    <button class="btn btn-outline" style="color:var(--danger);border-color:var(--danger);" onclick="deleteConsultation('${c.id}')">🗑️ Supprimer</button>
     ${c.statut !== 'terminée' ? `<button class="btn btn-outline" onclick="closeModal('modal-detail');openReponseModal('${c.id}')">📥 Saisir réponse</button>` : ''}
     ${c.statut !== 'terminée' ? `<button class="btn btn-outline" onclick="closeModal('modal-detail');openEmailModal('${c.id}')">✉️ Emails</button>` : ''}
     ${(c.statut==='validée'||c.statut==='transport_en_cours') ? `<button class="btn btn-primary" onclick="closeModal('modal-detail');openTransportModal('${c.id}')">🚚 Suivi transport</button>` : ''}
@@ -2033,6 +2035,17 @@ function deleteAffréteur(id) {
   affréteurs = affréteurs.filter(a=>a.id!==id);
   save();
   renderAffréteurs();
+}
+
+function deleteConsultation(id) {
+  const c = getConsult(id);
+  if (!c) return;
+  if (!confirm(`Supprimer la consultation ${c.reference} ?\nCette action est irréversible.`)) return;
+  consultations = consultations.filter(x => x.id !== id);
+  save();
+  closeModal('modal-detail');
+  renderConsultations();
+  showToast('🗑️ Consultation supprimée');
 }
 
 // ============================================================
@@ -3066,10 +3079,10 @@ function renderParametres() {
 //  DEMO DATA (si première utilisation)
 // ============================================================
 function initDemo() {
-  // Toujours rafraîchir les affréteurs (données de référence)
-  // Ne créer les consultations démo que si la base est vide
   const skipConsultations = consultations.length > 0;
-  if (affréteurs.length >= 10) { if (skipConsultations) return; }
+  // Ne charger les données démo que si aucune donnée utilisateur n'existe
+  const hasUserData = DB.get('user_data_initialized', false);
+  if (hasUserData || affréteurs.length > 0) { if (skipConsultations) return; else { /* skip aff reload */ return; } }
   affréteurs = [
     /* ── NATIONAL ─────────────────────────────────────────────── */
     {id:'aff_nat1',nom:'XPO Logistics France',contact:'Service Affrètement',email:'affrêtement.france@xpo.com',telephone:'01 85 49 00 00',zone:'National',specialite:'Lots complets & groupage',remarques:'Grand réseau national et européen',actif:true},
