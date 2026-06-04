@@ -2030,19 +2030,31 @@ function toggleAffréteur(id) {
   if (a) { a.actif = !a.actif; save(); renderAffréteurs(); }
 }
 
+function getDeletedIds() { return new Set(DB.get('deleted_ids', [])); }
+function addDeletedId(id) {
+  const ids = getDeletedIds();
+  ids.add(id);
+  DB.set('deleted_ids', [...ids]);
+}
+
 function deleteAffréteur(id) {
   if (!confirm('Supprimer cet affréteur ? Cette action est irréversible.')) return;
-  affréteurs = affréteurs.filter(a=>a.id!==id);
+  addDeletedId(id);
+  affréteurs = affréteurs.filter(a => a.id !== id);
   save();
+  saveToSharepoint(); // sauvegarde immédiate pour que la suppression soit sur SharePoint
   renderAffréteurs();
+  showToast('🗑️ Affréteur supprimé');
 }
 
 function deleteConsultation(id) {
   const c = getConsult(id);
   if (!c) return;
   if (!confirm(`Supprimer la consultation ${c.reference} ?\nCette action est irréversible.`)) return;
+  addDeletedId(id);
   consultations = consultations.filter(x => x.id !== id);
   save();
+  saveToSharepoint(); // sauvegarde immédiate
   closeModal('modal-detail');
   renderConsultations();
   showToast('🗑️ Consultation supprimée');
@@ -2378,27 +2390,22 @@ async function pullFromSharepoint(manual = false) {
     return;
   }
 
-  // MODE COLLABORATIF : SharePoint est la source unique de vérité.
-  // On fusionne en gardant le plus grand nombre de consultations.
+  // MODE COLLABORATIF avec gestion des suppressions
+  const deletedIds = getDeletedIds(); // IDs supprimés localement → ne jamais les réimporter
   let changed = false;
+
   if (remote.consultations) {
-    // Fusionner : garder toutes les consultations locales + celles de SharePoint non présentes localement
     const localIds = new Set(consultations.map(c => c.id));
-    const remoteOnly = remote.consultations.filter(c => !localIds.has(c.id));
-    if (remoteOnly.length > 0) {
-      consultations = [...consultations, ...remoteOnly];
-      changed = true;
-    }
-    // Si SharePoint a plus de modifications sur des consultations existantes, prendre SharePoint
-    if (!changed && JSON.stringify(remote.consultations) !== JSON.stringify(consultations)) {
-      // Prendre la version avec le plus de données
-      if (remote.consultations.length > consultations.length) {
-        consultations = remote.consultations; changed = true;
-      }
-    }
+    // Ajouter depuis SharePoint uniquement les non-supprimés et non-présents localement
+    const remoteOnly = remote.consultations.filter(c => !localIds.has(c.id) && !deletedIds.has(c.id));
+    if (remoteOnly.length > 0) { consultations = [...consultations, ...remoteOnly]; changed = true; }
   }
-  if (remote.affréteurs && remote.affréteurs.length > 0 && JSON.stringify(remote.affréteurs) !== JSON.stringify(affréteurs)) {
-    affréteurs = remote.affréteurs; changed = true;
+  if (remote.affréteurs && remote.affréteurs.length > 0) {
+    // Filtrer les affréteurs supprimés localement
+    const filtered = remote.affréteurs.filter(a => !deletedIds.has(a.id));
+    const localAffIds = new Set(affréteurs.map(a => a.id));
+    const newAffs = filtered.filter(a => !localAffIds.has(a.id));
+    if (newAffs.length > 0) { affréteurs = [...affréteurs, ...newAffs]; changed = true; }
   }
   if (changed) {
     DB.set('affréteurs', affréteurs);
