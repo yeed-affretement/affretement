@@ -1410,11 +1410,15 @@ function renderConsultations() {
             ${c.num_commande ? `<span class="badge badge-gray">Cmd: ${c.num_commande}</span>` : ''}
             ${hasEnough && c.statut !== 'validée' && c.statut !== 'terminée' ? `<span class="badge badge-orange urgent-indicator">⚡ Assez de réponses — Décidez !</span>` : ''}
           </div>
-          <div style="display:flex;gap:20px;font-size:13px;color:var(--text-muted);flex-wrap:wrap;">
-            <span>📦 ${c.nb_palettes} pal. ${c.type_palette || ''} — ${c.poids_kg} kg</span>
+          <div style="display:flex;gap:16px;font-size:13px;color:var(--text-muted);flex-wrap:wrap;">
             <span>📍 <strong>${c.enl_ville}</strong> → <strong>${c.liv_ville}</strong></span>
             <span>📤 Envoyée le ${formatDate(c.date_creation)}</span>
             ${options}${opts2}${opts3}${opts4}
+          </div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:3px;word-break:break-word;">
+            📦 ${c.lignes_palettes && c.lignes_palettes.length > 0
+              ? c.lignes_palettes.map(l => `${l.nb} pal.${l.dim ? ' ' + l.dim : ''}`).join(' + ')
+              : `${c.nb_palettes} pal. ${c.type_palette || ''}`} — ${c.poids_kg} kg
           </div>
         </div>
         <div style="text-align:right;flex-shrink:0;">
