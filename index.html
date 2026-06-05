@@ -2580,7 +2580,7 @@ async function pullFromSharepoint(manual = false) {
   if (!getSpConfig().siteUrl) { if (manual) alert('Configurez d\'abord l\'URL SharePoint dans ⚙️ Paramètres.'); return; }
   if (!msalAccount) { if (manual) { msalLogin(); } return; }
   // Cooldown 30s après une suppression pour laisser le temps au push de se propager
-  if (!manual && (Date.now() - _lastDeleteTime) < 30000) return;
+  if (!manual && (Date.now() - _lastDeleteTime) < 60000) return; // 60s cooldown après import/suppression
 
   updateSpStatus('loading');
   const remote = await loadFromSharepoint();
@@ -3327,6 +3327,9 @@ function applySyncResults() {
   pendingSyncResults = [];
 
   if (count > 0) {
+    // Sauvegarder immédiatement sur SharePoint et bloquer le pull 60s pour éviter écrasement
+    _lastDeleteTime = Date.now(); // réutilise le cooldown anti-pull
+    saveToSharepoint();
     renderDashboard();
     renderConsultations();
     updateNavBadges();
