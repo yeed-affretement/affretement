@@ -381,6 +381,11 @@
               </div>
               <div class="card">
                 <div class="form-section-title">🎯 Livraison</div>
+                <div class="form-group mb-8"><label>Client destinataire *</label><input type="text" name="client_livraison" required placeholder="Nom de l'entreprise ou particulier"></div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;" class="mb-8">
+                  <div class="form-group"><label>Email destinataire</label><input type="email" name="client_liv_email" placeholder="contact@client.fr"></div>
+                  <div class="form-group"><label>Téléphone destinataire</label><input type="text" name="client_liv_tel" placeholder="06 XX XX XX XX"></div>
+                </div>
                 <div class="form-group mb-8"><label>Adresse *</label><input type="text" name="liv_adresse" required placeholder="Rue, numéro"></div>
                 <div style="display:grid;grid-template-columns:1fr 2fr;gap:8px;" class="mb-8">
                   <div class="form-group"><label>CP *</label><input type="text" name="liv_cp" required placeholder="69001"></div>
@@ -1318,6 +1323,9 @@ function saveConsultation(e) {
     enl_pays: fd.get('enl_pays'),
     enl_date: fd.get('enl_date'),
     enl_horaires: fd.get('enl_horaires'),
+    client_livraison: fd.get('client_livraison'),
+    client_liv_email: fd.get('client_liv_email'),
+    client_liv_tel: fd.get('client_liv_tel'),
     liv_adresse: fd.get('liv_adresse'),
     liv_cp: fd.get('liv_cp'),
     liv_ville: fd.get('liv_ville'),
@@ -1523,7 +1531,7 @@ ${c.valeur_euro ? `• Valeur     : ${formatPrice(c.valeur_euro)} (info assuranc
 • ${c.enl_adresse}, ${c.enl_cp} ${c.enl_ville} (${c.enl_pays})
 ${c.enl_horaires ? `• Horaires : ${c.enl_horaires}\n` : ''}
 ━━━ LIVRAISON ━━━
-• ${c.liv_adresse}, ${c.liv_cp} ${c.liv_ville} (${c.liv_pays})
+${c.client_livraison ? `• Destinataire : ${c.client_livraison}\n` : ''}${c.client_liv_tel ? `• Tél. : ${c.client_liv_tel}\n` : ''}${c.client_liv_email ? `• Email : ${c.client_liv_email}\n` : ''}• ${c.liv_adresse}, ${c.liv_cp} ${c.liv_ville} (${c.liv_pays})
 ${c.liv_horaires ? `• Horaires : ${c.liv_horaires}\n` : ''}
 ${obsBlock ? `━━━ INFORMATIONS COMPLÉMENTAIRES ━━━\n${obsBlock}\n` : ''}
 Merci de nous faire parvenir votre meilleure offre ${dateLimite}.
@@ -2095,7 +2103,11 @@ function renderTransports() {
     const aff = getAff(c.affréteur_sélectionné);
     return `<tr>
       <td><strong>${c.reference}</strong>${c.num_expedition?`<br><span class="text-xs text-muted">${c.num_expedition}</span>`:''}</td>
-      <td style="color:var(--text-muted);font-size:12px;">${c.num_commande||'—'}</td>
+      <td style="font-size:12px;">
+        ${c.num_commande ? `<div style="font-weight:600;">${c.num_commande}</div>` : '<span style="color:var(--text-muted);">—</span>'}
+        ${c.client_livraison ? `<div style="color:var(--text-muted);font-size:11px;">${c.client_livraison}</div>` : ''}
+        ${c.client_liv_tel ? `<div style="color:var(--text-muted);font-size:11px;">📞 ${c.client_liv_tel}</div>` : ''}
+      </td>
       <td>${aff?.nom||'—'}</td>
       <td>${c.enl_cp} ${c.enl_ville}</td>
       <td>${c.liv_cp} ${c.liv_ville}</td>
