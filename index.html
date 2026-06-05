@@ -2111,20 +2111,73 @@ function renderTransports() {
   const enRoute = transports.filter(c => c.statut === 'transport_en_cours').length;
   const planifie = transports.filter(c => c.statut === 'validée').length;
   const livre = transports.filter(c => c.statut === 'terminée' && c.statut_transport === 'livré').length;
+  const today0 = new Date(); today0.setHours(0,0,0,0);
+  const nbPartis = transports.filter(c => { const d=c.date_depart?new Date(c.date_depart):null; d&&d.setHours(0,0,0,0); return d&&d<=today0&&c.statut_transport!=='livré'&&c.statut_transport!=='en_cours'; }).length;
+  const nbAFacturer = transports.filter(c => { const d=c.date_liv_prevue?new Date(c.date_liv_prevue):null; d&&d.setHours(0,0,0,0); return d&&d<=today0&&c.statut_transport!=='livré'; }).length;
+
   document.getElementById('transport-kpis').innerHTML = `
     <div class="kpi-card"><div class="kpi-label">En route</div><div class="kpi-value" style="color:var(--primary)">${enRoute}</div></div>
     <div class="kpi-card"><div class="kpi-label">Planifiés</div><div class="kpi-value">${planifie}</div></div>
     <div class="kpi-card"><div class="kpi-label">Livrés (total)</div><div class="kpi-value" style="color:var(--success)">${livre}</div></div>
+    ${nbPartis > 0 ? `<div class="kpi-card" style="border:2px solid #fb923c;background:#fff7ed;"><div class="kpi-label" style="color:#ea580c;">🚛 Partis</div><div class="kpi-value" style="color:#ea580c;">${nbPartis}</div><div class="kpi-sub">À mettre en route</div></div>` : ''}
+    ${nbAFacturer > 0 ? `<div class="kpi-card" style="border:2px solid #ef4444;background:#fef2f2;animation:pulse 2s infinite;"><div class="kpi-label" style="color:#dc2626;">💰 À facturer</div><div class="kpi-value" style="color:#dc2626;">${nbAFacturer}</div><div class="kpi-sub">Livraison dépassée</div></div>` : ''}
     <div class="kpi-card"><div class="kpi-label">Budget total</div><div class="kpi-value" style="font-size:18px;">${formatPrice(transports.reduce((s,c)=>s+(c.prix_final||0),0))}</div><div class="kpi-sub">Toutes expéditions</div></div>
   `;
+
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  // Compteurs alertes date
+  const alertDepart = transports.filter(c => {
+    const d = c.date_depart ? new Date(c.date_depart) : null;
+    return d && d <= today && c.statut_transport !== 'livré' && c.statut_transport !== 'en_cours';
+  }).length;
+  const alertLivraison = transports.filter(c => {
+    const d = c.date_liv_prevue ? new Date(c.date_liv_prevue) : null;
+    return d && d <= today && c.statut_transport !== 'livré';
+  }).length;
+
+  // Afficher les alertes en haut si besoin
+  const alertBar = document.getElementById('transport-alert-bar') || (() => {
+    const div = document.createElement('div'); div.id='transport-alert-bar';
+    document.getElementById('transport-kpis').after(div); return div;
+  })();
+  alertBar.innerHTML = [
+    alertDepart > 0 ? `<div style="background:#fff7ed;border:1px solid #fb923c;border-radius:8px;padding:10px 16px;display:flex;align-items:center;gap:10px;"><span style="font-size:20px;">🚛</span><strong>${alertDepart} transport(s) parti(s) — pensez à mettre à jour le statut</strong></div>` : '',
+    alertLivraison > 0 ? `<div style="background:#fef2f2;border:2px solid #ef4444;border-radius:8px;padding:10px 16px;display:flex;align-items:center;gap:10px;animation:pulse 2s infinite;"><span style="font-size:20px;">💰</span><strong style="color:#dc2626;">${alertLivraison} transport(s) à facturer ! Date de livraison dépassée</strong></div>` : '',
+  ].filter(Boolean).join('');
 
   const filtered = transports.filter(c => !search || c.reference.toLowerCase().includes(search) || (c.enl_ville+c.liv_ville).toLowerCase().includes(search));
   const tbody = document.getElementById('transport-tbody');
   if (!filtered.length) { tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-muted);">Aucun transport trouvé.</td></tr>`; return; }
+
   tbody.innerHTML = filtered.map(c => {
     const aff = getAff(c.affréteur_sélectionné);
-    return `<tr>
-      <td><strong>${c.reference}</strong>${c.num_expedition?`<br><span class="text-xs text-muted">${c.num_expedition}</span>`:''}</td>
+
+    // Calcul indicateurs date
+    const dDepart = c.date_depart ? new Date(c.date_depart) : null;
+    const dLivraison = c.date_liv_prevue ? new Date(c.date_liv_prevue) : null;
+    dDepart && dDepart.setHours(0,0,0,0);
+    dLivraison && dLivraison.setHours(0,0,0,0);
+
+    const departPasse = dDepart && dDepart <= today && c.statut_transport !== 'livré' && c.statut_transport !== 'en_cours';
+    const livraisonPassee = dLivraison && dLivraison <= today && c.statut_transport !== 'livré';
+    const enRouteAujourdhui = c.statut_transport === 'en_cours';
+
+    // Couleur de ligne
+    let rowBg = '';
+    if (livraisonPassee) rowBg = 'background:#fef2f2;'; // rouge clair = à facturer
+    else if (departPasse) rowBg = 'background:#fff7ed;'; // orange clair = parti
+    else if (enRouteAujourdhui) rowBg = 'background:#f0fdf4;'; // vert clair = en route
+
+    // Badge alerte
+    const alertBadge = livraisonPassee
+      ? `<span style="background:#dc2626;color:#fff;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:700;margin-left:4px;">💰 À FACTURER</span>`
+      : departPasse
+      ? `<span style="background:#ea580c;color:#fff;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:700;margin-left:4px;">🚛 PARTI</span>`
+      : '';
+
+    return `<tr style="${rowBg}">
+      <td><strong>${c.reference}</strong>${c.num_expedition?`<br><span class="text-xs text-muted">${c.num_expedition}</span>`:''}${alertBadge}</td>
       <td style="font-size:12px;">
         ${c.num_commande ? `<div style="font-weight:600;">${c.num_commande}</div>` : '<span style="color:var(--text-muted);">—</span>'}
         ${c.client_livraison ? `<div style="color:var(--text-muted);font-size:11px;">${c.client_livraison}</div>` : ''}
@@ -2133,8 +2186,8 @@ function renderTransports() {
       <td>${aff?.nom||'—'}</td>
       <td>${c.enl_cp} ${c.enl_ville}</td>
       <td>${c.liv_cp} ${c.liv_ville}</td>
-      <td>${formatDate(c.enl_date)}</td>
-      <td>${formatDate(c.date_liv_prevue||c.liv_date)}</td>
+      <td>${c.date_depart ? `<span style="${departPasse?'color:#ea580c;font-weight:700;':''}">${formatDate(c.date_depart)}</span>` : '—'}</td>
+      <td>${c.date_liv_prevue ? `<span style="${livraisonPassee?'color:#dc2626;font-weight:700;':''}">${formatDate(c.date_liv_prevue)}</span>` : '—'}</td>
       <td>${transportStatusBadge(c.statut_transport, c)}</td>
       <td><button class="btn btn-primary btn-xs" onclick="openTransportModal('${c.id}')">✏️ Mettre à jour</button></td>
     </tr>`;
