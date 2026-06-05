@@ -3294,11 +3294,12 @@ function renderSyncResultsModal() {
           <div class="pec-meta">De : ${escapeHtml(r.fromName)} &lt;${escapeHtml(r.from)}&gt; — ${formatDateTime(r.receivedAt)}</div>
           <div class="pec-meta">→ Consultation : <strong>${r.consultRef}</strong> ${affName}</div>
         </div>
-        <div style="text-align:right;flex-shrink:0;">
+        <div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
           <span class="badge ${conf}">${confLabel} (${r.confidence}%)</span>
-          <div style="margin-top:8px;"><label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;justify-content:flex-end;">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
             <input type="checkbox" checked onchange="toggleSyncItem(${idx},this.checked)"> Importer
-          </label></div>
+          </label>
+          <button onclick="ignoreSyncItem(${idx})" style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer;font-size:11px;color:var(--text-muted);" title="Ignorer définitivement cet email">🗑️ Ignorer</button>
         </div>
       </div>
       <div class="pec-fields" style="grid-template-columns:repeat(auto-fill,minmax(160px,1fr));">
@@ -3336,6 +3337,20 @@ function toggleSyncItem(idx, checked) {
   if (pendingSyncResults[idx]) pendingSyncResults[idx]._skip = !checked;
   const card = document.getElementById('pec-' + idx);
   if (card) card.style.opacity = checked ? '1' : '0.4';
+}
+
+function ignoreSyncItem(idx) {
+  const r = pendingSyncResults[idx];
+  if (!r) return;
+  // Marquer définitivement comme vu/ignoré
+  markEmailsSeen([r.msgId]);
+  // Retirer de la liste et re-rendre
+  pendingSyncResults.splice(idx, 1);
+  renderSyncResultsModal();
+  if (pendingSyncResults.length === 0) {
+    closeModal('modal-sync-results');
+    showToast('✅ Tous les emails traités.');
+  }
 }
 
 function setSyncSelectAll(checked) {
