@@ -3121,16 +3121,21 @@ async function syncOutlookReplies(consultId = null) {
 }
 
 function isAlreadyImported(msgId) {
-  // Un email est "déjà traité" uniquement s'il a été importé dans une réponse
-  return consultations.some(c => (c.reponses || []).some(r => r.msg_id === msgId));
+  // Importé dans une réponse
+  if (consultations.some(c => (c.reponses || []).some(r => r.msg_id === msgId))) return true;
+  // Supprimé explicitement par l'utilisateur
+  const dismissed = DB.get('dismissed_email_ids', []);
+  return dismissed.includes(msgId);
 }
 
 function markEmailsSeen(msgIds) {
-  const seen = new Set(DB.get('seen_email_ids', []));
-  msgIds.forEach(id => seen.add(id));
-  // Garder seulement les 500 derniers pour éviter la surcharge
-  const arr = [...seen].slice(-500);
-  DB.set('seen_email_ids', arr);
+  // Ne fait plus rien — on utilise dismissed_email_ids pour les suppressions explicites
+}
+
+function dismissEmailsPermanently(msgIds) {
+  const dismissed = new Set(DB.get('dismissed_email_ids', []));
+  msgIds.forEach(id => dismissed.add(id));
+  DB.set('dismissed_email_ids', [...dismissed].slice(-1000));
 }
 
 function matchEmailToConsultation(subject, fromEmail, targetConsultId = null) {
@@ -3299,7 +3304,7 @@ function renderSyncResultsModal() {
           <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
             <input type="checkbox" checked onchange="toggleSyncItem(${idx},this.checked)"> Importer
           </label>
-          <button onclick="ignoreSyncItem(${idx})" style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer;font-size:11px;color:var(--text-muted);" title="Ignorer définitivement cet email">🗑️ Ignorer</button>
+          <button onclick="ignoreSyncItem(${idx})" style="padding:3px 8px;border:1px solid var(--danger);border-radius:4px;background:#fff;cursor:pointer;font-size:11px;color:var(--danger);" title="Supprimer définitivement — ne reviendra plus">🗑️ Supprimer</button>
         </div>
       </div>
       <div class="pec-fields" style="grid-template-columns:repeat(auto-fill,minmax(160px,1fr));">
@@ -3342,9 +3347,8 @@ function toggleSyncItem(idx, checked) {
 function ignoreSyncItem(idx) {
   const r = pendingSyncResults[idx];
   if (!r) return;
-  // Marquer définitivement comme vu/ignoré
-  markEmailsSeen([r.msgId]);
-  // Retirer de la liste et re-rendre
+  // Supprimer définitivement — ne reviendra plus jamais
+  dismissEmailsPermanently([r.msgId]);
   pendingSyncResults.splice(idx, 1);
   renderSyncResultsModal();
   if (pendingSyncResults.length === 0) {
@@ -3426,7 +3430,8 @@ function applySyncResults() {
 
   save();
   // Marquer tous les emails comme vus (importés ou non) pour ne plus les revoir
-  markEmailsSeen(pendingSyncResults.map(r => r.msgId));
+  // Marquer les emails importés comme supprimés définitivement (ne plus jamais les proposer)
+  dismissEmailsPermanently(pendingSyncResults.map(r => r.msgId));
   closeModal('modal-sync-results');
   pendingSyncResults = [];
 
