@@ -2754,13 +2754,14 @@ function renderCurrentPage() {
   showPage(id);
 }
 
-function showToast(msg) {
+function showToast(msg, type) {
   const t = document.createElement('div');
-  t.className = 'alert alert-success';
-  t.style.cssText = 'position:fixed;top:70px;right:24px;z-index:9999;min-width:240px;animation:fadeIn .2s ease;';
+  const cls = type === 'warning' ? 'alert-warning' : type === 'error' ? 'alert-danger' : 'alert-success';
+  t.className = `alert ${cls}`;
+  t.style.cssText = 'position:fixed;top:70px;right:24px;z-index:9999;min-width:280px;max-width:480px;animation:fadeIn .2s ease;font-size:13px;';
   t.textContent = msg;
   document.body.appendChild(t);
-  setTimeout(() => t.remove(), 3000);
+  setTimeout(() => t.remove(), type === 'warning' ? 6000 : 3000);
 }
 
 function initMsal() {
@@ -3329,9 +3330,12 @@ function applySyncResults() {
     renderDashboard();
     renderConsultations();
     updateNavBadges();
-    alert(`✅ ${count} réponse(s) importée(s) avec succès.`);
+    showToast(`✅ ${count} réponse(s) importée(s) avec succès.`);
   } else {
-    alert('Aucune réponse importée.\n\n' + (debugLog.length ? debugLog.join('\n') : 'Cause inconnue.'));
+    // Afficher le diagnostic dans un toast et dans la console
+    const msg = debugLog.length ? debugLog.join(' | ') : 'Cause inconnue';
+    console.warn('[Import] Aucune réponse importée :', msg);
+    showToast('⚠️ Aucune réponse importée — ' + msg, 'warning');
   }
   renderSyncHistory();
 }
