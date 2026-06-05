@@ -464,6 +464,7 @@
             <thead>
               <tr>
                 <th>Référence</th>
+                <th>N° commande</th>
                 <th>Affréteur</th>
                 <th>Enlèvement</th>
                 <th>Livraison</th>
@@ -2089,11 +2090,12 @@ function renderTransports() {
 
   const filtered = transports.filter(c => !search || c.reference.toLowerCase().includes(search) || (c.enl_ville+c.liv_ville).toLowerCase().includes(search));
   const tbody = document.getElementById('transport-tbody');
-  if (!filtered.length) { tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-muted);">Aucun transport trouvé.</td></tr>`; return; }
+  if (!filtered.length) { tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-muted);">Aucun transport trouvé.</td></tr>`; return; }
   tbody.innerHTML = filtered.map(c => {
     const aff = getAff(c.affréteur_sélectionné);
     return `<tr>
       <td><strong>${c.reference}</strong>${c.num_expedition?`<br><span class="text-xs text-muted">${c.num_expedition}</span>`:''}</td>
+      <td style="color:var(--text-muted);font-size:12px;">${c.num_commande||'—'}</td>
       <td>${aff?.nom||'—'}</td>
       <td>${c.enl_cp} ${c.enl_ville}</td>
       <td>${c.liv_cp} ${c.liv_ville}</td>
