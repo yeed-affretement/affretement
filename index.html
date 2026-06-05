@@ -2058,18 +2058,36 @@ function selectAffréteur(consultId, repIdx) {
 
   if (aff) {
     if (msalApp && msalAccount) {
-      // Envoi direct via Graph API
-      getMailToken().then(token => {
-        if (!token) {
-          showToast('❌ Impossible d\'obtenir le token — email non envoyé.', 'error');
-          return;
+      getMailToken().then(async token => {
+        if (!token) { showToast('❌ Token manquant — emails non envoyés.', 'error'); return; }
+
+        // 1. Email de confirmation au transporteur retenu
+        try {
+          await sendGraphMail(token, aff.email, aff.contact || aff.nom, subject, body);
+          showToast(`✅ Confirmation envoyée à ${aff.nom}`);
+        } catch(e) {
+          showToast('❌ Erreur confirmation : ' + e.message, 'error');
         }
-        sendGraphMail(token, aff.email, aff.contact || aff.nom, subject, body)
-          .then(() => showToast(`✅ Email de confirmation envoyé à ${aff.nom}`))
-          .catch(e => showToast('❌ Erreur envoi confirmation : ' + e.message, 'error'));
+
+        // 2. Emails de refus aux transporteurs non retenus (qui ont répondu)
+        const rejectedAffIds = c.reponses
+          .filter(r => r.affréteur_id !== c.affréteur_sélectionné && r.prix_ht != null)
+          .map(r => r.affréteur_id);
+
+        for (const rejId of rejectedAffIds) {
+          const rejAff = getAff(rejId);
+          if (!rejAff) continue;
+          const rejSubject = `Retour consultation — ${c.reference} — ${c.enl_ville} → ${c.liv_ville}`;
+          const rejBody = `Bonjour ${rejAff.contact || rejAff.nom},\n\nNous vous remercions pour votre offre concernant l'expédition suivante :\n\nRéférence : ${c.reference}\nTrajet     : ${c.enl_ville} → ${c.liv_ville}\n\nAprès étude des différentes propositions reçues, nous avons retenu une autre offre pour cette expédition.\n\nNous espérons avoir l'occasion de travailler ensemble prochainement.\n\nCordialement,\n${sig}${buildSigTel()}`;
+          try {
+            await sendGraphMail(token, rejAff.email, rejAff.contact || rejAff.nom, rejSubject, rejBody);
+            showToast(`📧 Refus envoyé à ${rejAff.nom}`);
+          } catch(e) {
+            showToast(`⚠️ Impossible d'envoyer le refus à ${rejAff.nom}`, 'warning');
+          }
+        }
       });
     } else {
-      // Fallback Outlook
       const mailto = buildMailto(aff.email, subject, body);
       if (confirm(`Affréteur sélectionné : ${aff.nom}\nPrix : ${formatPrice(c.prix_final)} HT\n\nOuvrir Outlook pour envoyer l'email de confirmation ?`)) {
         window.location.href = mailto;
